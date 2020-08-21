@@ -241,9 +241,6 @@ io.on('connection', function(socket) {
    socket.on('agent_noo', function(data) {
       io.sockets.emit('agent_noo', data);
    })
-   socket.on('agent_yess', function(data) {
-      io.sockets.emit('agent_yess', data);
-   })
    socket.on('userregistered', function(data) {
       io.sockets.emit('userregistered', data);
    })
