@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+
+<head>
+  <title>Socket.IO chat</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font: 13px Helvetica, Arial;
+    }
+
+    form {
+      background: #000;
+      padding: 3px;
+      position: fixed;
+      bottom: 0;
+      width: 100%;
+    }
+
+    form input {
+      border: 0;
+      padding: 10px;
+      width: 90%;
+      margin-right: .5%;
+    }
+
+    form button {
+      width: 9%;
+      background: rgb(130, 224, 255);
+      border: none;
+      padding: 10px;
+    }
+
+    #messages {
+      list-style-type: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    #messages li {
+      padding: 5px 10px;
+    }
+
+    #messages li:nth-child(odd) {
+      background: #eee;
+    }
+
+    #messages {
+      margin-bottom: 40px
+    }
+
+    .leave-btn {
+      padding: 8px 12px;
+      border: 1px solid blue;
+      background: blue;
+      color: white;
+      font-weight: bold;
+      font-size: 16px;
+      font-family: Trebuchet MS;
+      border-radius: 6px;
+    }
+
+    .name-input {
+      padding: 8px;
+      font-size: 16px;
+      border-radius: 6px;
+      border: 1px solid lightgray;
+      margin: 5px 10px;
+      font-family: Trebuchet MS;
+    }
+
+    .error-container {
+      padding: 6px;
+      font-family: Trebuchet MS;
+      font-size: 18px;
+      font-weight: bold;
+      color: red;
+    }
+
+    .message-box {
+      padding: 10px 12px 2px 12px;
+      font-size: 16px;
+      font-family: Trebuchet MS;
+    }
+  </style>
+  <script src="https://cdn.socket.io/socket.io-1.2.0.js"></script>
+  <script src="https://code.jquery.com/jquery-1.11.1.js"></script>
+  <script>
+    $(function() {
+      // var socket = io('/my-namespace');
+      // socket.on('hi',function(data) {
+      //    document.body.innerHTML = '';
+      //    document.write(data);
+      // });
+      var socket = io();
+
+      var btn = document.getElementById('btn');
+      btn.addEventListener('click', function(k) {
+        var name = document.getElementById('name').value;
+        if (name && name.length > 0) {
+          socket.emit('setUsername', document.getElementById('name').value);
+        } else {
+          document.getElementById('error-container').innerHTML = 'Name cannot be empty';
+        }
+      })
+
+      var user;
+      socket.on('userExists', function(data) {
+        document.getElementById('error-container').innerHTML = data;
+      });
+      socket.on('userSet', function(data) {
+        user = data.username;
+        document.body.innerHTML = '<input class = "name-input" placeholder="Enter Text" type = "text" id = "message">\
+       <button type = "button" name = "button" id = "send-btn" class = "leave-btn">Send</button>\
+       <div id = "message-container"></div>';
+        setTimeout(function() {
+          var send_btn = document.getElementById('send-btn');
+          send_btn.addEventListener('click', function(k) {
+            var msg = document.getElementById('message').value;
+            if (msg) {
+              socket.emit('msg', {
+                message: msg,
+                user: user
+              });
+            }
+          })
+        }, 1000)
+
+      });
+
+      socket.on('newmsg', function(data) {
+        if (user) {
+          document.getElementById('message-container').innerHTML += '<div class="message-box"><b>' +
+            data.user + '</b>: ' + data.message + '</div>'
+        }
+      })
+      // socket.on('connectToRoom', function(data) {
+      //   document.body.innerHTML = '';
+      //   document.write(data);
+      // });
+      // var roomNo;
+      // socket.on('SendingRoom', function(data) {
+      //   roomNo = data;
+      // });
+      // var btn = document.getElementById('button');
+      // btn.addEventListener('click', function(k) {
+      //   socket.emit('clientEvent', roomNo);
+      // })
+      // var socket = io();
+      // socket.on('broadcast', function(data) {
+      //   document.body.innerHTML = '';
+      //   document.write(data.description);
+      // });
+      // socket.on('newclientconnect',function(data) {
+      //    document.body.innerHTML = '';
+      //    document.write(data.description);
+      // });
+      // $('form').submit(function() {
+      //   socket.emit('chat message', $('#m').val());
+      //   $('#m').val('');
+      //   return false;
+      // });
+      // socket.on('chat message', function(msg) {
+      //   $('#messages').append($('<li>').text(msg));
+      //   window.scrollTo(0, document.body.scrollHeight);
+      // });
+    });
+  </script>
+</head>
+
+<body>
+  <div id="error-container" class="error-container"></div>
+  <input id="name" type="text" class="name-input" name="name" value="" placeholder="Enter your name!">
+  <button type="button" id="btn" class="leave-btn" name="button">
+    Let me chat!
+  </button>
+</body>
+
+</html>
