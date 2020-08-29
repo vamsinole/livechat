@@ -130,7 +130,8 @@ io.on('connection', function(socket) {
       else{
         session_id = decrypt(data["session_id"]);
       }
-      io.sockets.emit('adminsentmessagetoadmins ', data)
+      console.log('adminsentmessagetoadmins data',data)
+      io.sockets.emit('adminsentmessagetoadmins', data)
       var customer_id=""
       Promise.resolve(m_storechat.getCustomerId(data["chatbot_id"])).then(function(result){
         customer_id = result["customer_id"];
@@ -241,6 +242,9 @@ io.on('connection', function(socket) {
    socket.on('agent_noo', function(data) {
       io.sockets.emit('agent_noo', data);
    })
+   socket.on('agent_yess', function(data) {
+      io.sockets.emit('agent_yess', data);
+   })
    socket.on('userregistered', function(data) {
       io.sockets.emit('userregistered', data);
    })
@@ -284,6 +288,25 @@ io.on('connection', function(socket) {
       Promise.resolve(m_storechat.closeSession(session_id)).then(function(result){
 
       })
+   })
+   socket.on('requestfeedback',function(data){
+    io.sockets.emit('requestfeedback',data)
+   })
+   socket.on('submitfeedback',function(data){
+    console.log('submitfeedback data',data)
+    if(data["session_id"].length > 10){
+      session_id = decrypt(data["session_id"]);
+    }
+    else if(data["session_id"].length < 10){
+      session_id = data["session_id"]
+    }
+    else{
+      session_id = decrypt(data["session_id"]);
+    }
+    io.sockets.emit('submitfeedback',data)
+    Promise.resolve(m_storechat.saveFeedback(session_id,data['rating'])).then(function(result){
+
+    })
    })
    socket.on('resetusermessages',function(data){
     io.sockets.emit('resetusermessages',data)
