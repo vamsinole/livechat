@@ -20,6 +20,14 @@ module.exports = {
 			});
 		});
 	},
+	checkSession: function(session_id){
+		query = "SELECT * FROM live_chat_sessions WHERE session_id=?";
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [session_id]).then(function (result){
+				resolve(result);
+			});
+		});
+	},
 	getWhatsappDetails: function(bot_id){
 		query = "SELECT product_token AS product_token,cm_number AS cm_number FROM whatsapp_bots WHERE chatbot_id=?";
 		return knex.select('product_token','cm_number').from('whatsapp_bots').where('chatbot_id',bot_id).then(data => data[0])
@@ -61,6 +69,15 @@ module.exports = {
 		console.log("updating assigned agent_id");
 		return new Promise(function (resolve, reject){
 			knex.raw(query, [agent_id,session_id]).then(function (result){
+				resolve(result);
+			});
+		});
+	},
+	saveFeedback: function(session_id,rating){
+		query = "UPDATE live_chat_sessions SET session_feedback=? WHERE session_id=?";
+		console.log("updating session feedback");
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [rating,session_id]).then(function (result){
 				resolve(result);
 			});
 		});

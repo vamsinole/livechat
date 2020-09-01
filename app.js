@@ -172,15 +172,31 @@ io.on('connection', function(socket) {
         data['session_id'] = session_id
         console.log("set session ",data)
         io.sockets.emit('setsession', data);
-        Promise.resolve(m_storechat.setSession(data["bot_id"],session_id)).then(function(result){
+        Promise.resolve(m_storechat.checkSession(session_id)).then(function(result){
+          if(result[0].length>0){
+            console.log("session already there")
+          }
+          else{
+            console.log("no session so inserting")
+            Promise.resolve(m_storechat.setSession(data["bot_id"],session_id)).then(function(result){
 
+            })
+          }
         })
       }
       else{
         console.log("set session ",data)
         io.sockets.emit('setsession', data);
-        Promise.resolve(m_storechat.setSession(data["bot_id"],session_id,data["ip_address"],data["user_location"],data["user_url"])).then(function(result){
+        Promise.resolve(m_storechat.checkSession(session_id)).then(function(result){
+          if(result[0].length>0){
+            console.log("session already there")
+          }
+          else{
+            console.log("no session so inserting")
+            Promise.resolve(m_storechat.setSession(data["bot_id"],session_id,data["ip_address"],data["user_location"],data["user_url"])).then(function(result){
 
+            })
+          }
         })
       }
       if(data['bot_id'] == '203')
@@ -307,6 +323,12 @@ io.on('connection', function(socket) {
     Promise.resolve(m_storechat.saveFeedback(session_id,data['rating'])).then(function(result){
 
     })
+   })
+   socket.on('banip',function(data){
+    io.sockets.emit('banip',data)
+   })
+   socket.on('unbanip',function(data){
+    io.sockets.emit('unbanip',data)
    })
    socket.on('resetusermessages',function(data){
     io.sockets.emit('resetusermessages',data)
