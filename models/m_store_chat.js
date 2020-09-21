@@ -82,6 +82,41 @@ module.exports = {
 			});
 		});
 	},
+	saveFeedbackMessage: function(session_id,message){
+		query = "UPDATE live_chat_sessions SET feedback_message=? WHERE session_id=?";
+		console.log("updating session feedback message");
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [message,session_id]).then(function (result){
+				resolve(result);
+			});
+		});
+	},
+	userSeenMessage: function(session_id){
+		query = "UPDATE chats SET is_seen='1' WHERE type='customer' AND session_id=?";
+		console.log("user seen message event");
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [session_id]).then(function (result){
+				resolve(result);
+			});
+		});
+	},
+	agentSeenMessage: function(session_id){
+		query = "UPDATE chats SET is_seen='1' WHERE type='user' AND session_id=?";
+		console.log("agent seen message event");
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [session_id]).then(function (result){
+				resolve(result);
+			});
+		});
+	},
+	markResolved: function(session_id){
+		query = "UPDATE live_chat_sessions SET is_resolved='1',is_closed='1' WHERE session_id=?";
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [session_id]).then(function (result){
+				resolve(result);
+			});
+		});
+	},
 	closeSession: function(session_id){
 		query = "UPDATE live_chat_sessions SET is_closed='1' WHERE session_id=?";
 		return new Promise(function (resolve, reject){
