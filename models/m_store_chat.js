@@ -117,6 +117,14 @@ module.exports = {
 			});
 		});
 	},
+	getAgentsList: function(bot_id){
+		query = "SELECT c.email FROM customer_roles cr INNER JOIN customers c ON c.id=cr.role_customer_id WHERE admin_customer_id=(SELECT c.id FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?) UNION SELECT c.email FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?";
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [bot_id,bot_id]).then(function (result){
+				resolve(result);
+			});
+		});
+	},
 	closeSession: function(session_id){
 		query = "UPDATE live_chat_sessions SET is_closed='1' WHERE session_id=?";
 		return new Promise(function (resolve, reject){

@@ -171,6 +171,9 @@ function startConnect() {
   socket.on('usertyping', function(data) {
     io.sockets.emit('usertyping', data);
   })
+  socket.on('requestaccess', function(data) {
+    io.sockets.emit('requestaccess', data);
+  })
   socket.on('setsession', function(data) {
     session_id = decrypt(data["session_id"]);
     if (data['channel'] == 'whatsapp') {
@@ -188,11 +191,10 @@ function startConnect() {
           })
         }
       })
-    } else {
+    }else{
       data['ip_address'] = decrypt(data['ip_address'])
       data['user_location'] = decrypt(data['user_location'])
       console.log("set session ", data)
-      io.sockets.emit('setsession', data);
       Promise.resolve(m_storechat.checkSession(session_id)).then(function(result) {
         if (result[0].length > 0) {
           console.log("session already there")
@@ -204,6 +206,18 @@ function startConnect() {
         }
       })
     }
+    io.sockets.emit('setsession', data);
+    Promise.resolve(m_storechat.getAgentsList(data["bot_id"])).then(function(result){
+      agents_list = result;
+      sendGridEmailSending(agents_list[0],data['bot_name'],function (error, response){
+        if(error){
+          console.log("sendgrid email sending error");
+        }
+        else{
+          console.log("sendgrid email sending no error");
+        }
+      })
+    })
     if (data['bot_id'] == '203') {
       const body = {
         messages: {
@@ -392,6 +406,51 @@ function startConnect() {
     io.sockets.emit('make-answer', data)
   })
 })
+}
+
+function sendGridEmailSending(agents_list,bot_name){
+  var tomail = [];
+  for(var i = 0; i < agents_list.length; i++){
+    tomail.push({ email: agents_list[i]['email']});
+  }
+  console.log("to emails")
+  console.log(tomail)
+  var options = {
+    method: 'POST',
+    url: 'https://api.sendgrid.com/v3/mail/send',
+    headers: {
+       'cache-control': 'no-cache',
+       'Content-Type': 'application/json',
+       'authorization': 'Bearer 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' // process.env.ENV
+    },
+
+
+
+    body: {
+
+      personalizations: [ { to: tomail }],
+      from: { email: 'info@smatbot.com' },
+      subject: 'You have a user waiting for you in '+bot_name+' Live Chat!!!',
+      content: [
+          {
+              type: 'text/html',
+              value: '<div style="width: 70%;margin-right: auto;margin-left: auto;float: none"><div style="float: left;margin-left: auto;margin-right: auto;width:100%;margin:0;font-family:trebuchet MS;border:1px solid lightgray"><div style="float: left;width:100%"><div style="width:100%;background:white;float:left;border-bottom: 1px solid lightgray"><div style="float:left;width:100%"><h2 style="float: left;min-width:98%;text-align: center;margin-left: 1%;margin-top:10px;margin-bottom:10px;margin-left:10px" class="logo"><img src="https://s3.ap-south-1.amazonaws.com/custpostimages/sb_images/SB_logo_horizontal_text.png" height="60" alt=""></h2></div></div><div style="float: left;width:100%;background:#1094d126;font-size:16px"><div style="width:90%;margin-left:5%;margin-right:5%;display:block;float:left;padding:10px;margin-top: 25px;margin-bottom: 25px;box-sizing: border-box"><label style="float:left;width:100%">Dear Customer,</label><label style="margin-top:15px;float:left;width:100%">Hope <a href="https://www.smatbot.com/login" style="text-decoration:none" target="_blank">SmatBot</a> served you well.</label><label style="margin-top:15px;float:left;width:100%">A user is waiting for you to connect with them on '+ bot_name +' SmatBot.</label><label style="margin-top:15px;float:left;width:100%">Please check immediately.</label><label style="margin-top:25px;float:left;width:100%">Thank you,<br>SmatBot Team</label></div></div></div></div></div>'
+          }
+      ]
+    },
+    json: true
+  };
+  return new Promise(function(resolve,reject){
+    request(options, function (error, response, body) {
+        if (error) {
+            console.log('sendgrid email sending failed for response:'+JSON.stringify(error))
+            resolve(true)
+        }else{
+            console.log('sendgrid email sent to response:'+JSON.stringify(body))
+            resolve(true)
+        }
+    })
+  })
 }
 
 io.on('close', function(socket) {
