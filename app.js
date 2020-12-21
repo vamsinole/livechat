@@ -1,5 +1,6 @@
 var app = require('express')();
 const fs = require('fs');
+const nodemailer = require('nodemailer');
 const request = require('request')
 const axios = require('axios');
 let m_storechat = require('./models/m_store_chat');
@@ -8,6 +9,12 @@ var http = require('https').createServer({
   cert: fs.readFileSync('/home/ubuntu/cert.pem')
 }, app);
 var dir_name = '/home/ubuntu/test-project/'
+const AccessToken = require('twilio').jwt.AccessToken;
+const VideoGrant = AccessToken.VideoGrant;
+
+const twilioAccountSid = 'AC63f423bcdcf304c0c3a8cdc674083708';
+const twilioApiKey = 'SK5f4cadbd99aa358cee794cd84bd15633';
+const twilioApiSecret = 'rKSM1dKB5jwc0O1Vw5dSS738HKg6IO6I';
 
 var io = require('socket.io')(http, {
   pingTimeout: 60000,
@@ -18,6 +25,17 @@ var io = require('socket.io')(http, {
 app.get('/', function(req, res) {
   res.sendFile(__dirname + '/index.html');
 });
+
+app.get('/getToken',function(req,res){
+  var token = new AccessToken(twilioAccountSid, twilioApiKey, twilioApiSecret);
+  token.identity = req.query.identity;
+  const videoGrant = new VideoGrant({
+      room: req.query.room
+  });
+  token.addGrant(videoGrant);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json({token_twilio : token.toJwt()})
+})
 
 var decrypt = function(text) {
   var MCrypt = require('mcrypt').MCrypt;
@@ -46,6 +64,21 @@ function startConnect() {
 
   console.log('A user connected');
   if_connected = true;
+  socket.on('start-video', function(data) {
+    io.sockets.emit('start-video', data);
+  })
+  socket.on('video-declined', function(data) {
+    io.sockets.emit('video-declined', data);
+  })
+  socket.on('video-disconnect', function(data) {
+    io.sockets.emit('video-disconnect', data);
+  })
+  socket.on('start-screen-share', function(data) {
+    io.sockets.emit('start-screen-share', data);
+  })
+  socket.on('stop-screen-share', function(data) {
+    io.sockets.emit('stop-screen-share', data);
+  })
   socket.on('setUsername', function(data) {
     console.log(users);
     console.log(users.indexOf(data));
@@ -86,43 +119,14 @@ function startConnect() {
     })
     if (data["channel"] == 'whatsapp') {
       Promise.resolve(m_storechat.getWhatsappDetails(data['chatbot_id'])).then(function(result) {
-        var access_token = result['product_token']
-        var cm_number = result['cm_number']
-        console.log("access_token ", access_token)
-        console.log('cm_number ', cm_number)
-        console.log('user_number ', data['user_number'])
-        console.log('message ', data['message'])
-        console.log('chatbot_id ', data['chatbot_id'])
-        const body = {
-          messages: {
-            authentication: {
-              productToken: access_token
-            },
-            msg: [{
-              body: {
-                type: 'auto',
-                content: 'Fallback text for SMS'
-              },
-              to: [{
-                number: data['device_print']
-              }],
-              from: cm_number,
-              allowedChannels: ["WhatsApp"],
-              richContent: {
-                conversation: [{
-                  text: data["message"]
-                }]
-              }
-            }]
-          }
+        console.log("inside channel whatsapp",result['provider'])
+        if(result['provider'] == "cm.com"){
+          send_message = send_cmmessage(result,data)
         }
-        axios.post('https://gw.cmtelecom.com/v1.0/message', body)
-          .then((res) => {
-            console.log(`Status: ${res.status}`);
-            console.log('Body: ', res.data);
-          }).catch((err) => {
-            console.error(err);
-          });
+        else if(result['provider'] == "wati"){
+          send_message = send_watimessage(result,data)
+        }
+        
       })
     }
   })
@@ -207,16 +211,49 @@ function startConnect() {
       })
     }
     io.sockets.emit('setsession', data);
-    Promise.resolve(m_storechat.getAgentsList(data["bot_id"])).then(function(result){
-      agents_list = result;
-      sendGridEmailSending(agents_list[0],data['bot_name'],function (error, response){
-        if(error){
-          console.log("sendgrid email sending error");
-        }
-        else{
-          console.log("sendgrid email sending no error");
-        }
-      })
+    Promise.resolve(m_storechat.isWhatsappEnabled(data['bot_id'])).then(function(res){
+      is_whatsapp_enabled = res[0]['live_chat_whatsapp_notification']
+      if(is_whatsapp_enabled == '1'){
+        Promise.resolve(m_storechat.getAgentsList(data["bot_id"])).then(function(resp){
+          agents_list = resp[0];
+          Promise.resolve(m_storechat.getWhatsappDetails("5354")).then(function(result){
+            for(i=0;i<agents_list.length;i++){
+              sendWhatsappNotification(agents_list[i]['phone_number'],result,data['bot_name'])
+            }
+          })
+        })
+      }
+    })
+    Promise.resolve(m_storechat.getCustomerType(data['bot_id'])).then(function(res){
+      let customer_type = res
+      if(customer_type[0]['customer_type'] == 'reseller_client'){
+
+      }
+      else{
+        Promise.resolve(m_storechat.getAgentsList(data["bot_id"])).then(function(result){
+          agents_list = result;
+          if(customer_type[0]['id'] == '4473'){
+            sendWhitelabelMail(agents_list[0],function(error, response){
+              if(error){
+                console.log("Talal email sending error");
+              }
+              else{
+                console.log("Tala email sending no error");
+              }
+            })
+          }
+          else{
+            sendGridEmailSending(agents_list[0],data['bot_name'],function (error, response){
+              if(error){
+                console.log("sendgrid email sending error");
+              }
+              else{
+                console.log("sendgrid email sending no error");
+              }
+            })
+          }
+        })
+      }
     })
     if (data['bot_id'] == '203') {
       const body = {
@@ -408,6 +445,143 @@ function startConnect() {
 })
 }
 
+function sendWhatsappNotification(number,data,bot_name){
+  var access_token = data['product_token']
+  const headers = {
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer '+access_token
+    }
+  }
+  number = number.replace("+","");
+  number = number.replace("-","");
+  const body = {
+    to:number,
+    type:"template",
+    template:{
+      namespace:"46827356_1e8f_4347_88fb_3ed5f42cbce7",
+      name:"live_chat",
+      language:{
+        policy:"deterministic",
+        code:"en_US"
+      },
+      components:[
+      {
+        type:"body",
+        parameters:[
+        {
+          type:"text",
+          text:"*"+bot_name+"*"
+        }
+        ]
+      }
+      ]
+    }
+  }
+  axios.post('https://whatsapp-api-491.clare.ai/v1/messages/',body,headers)
+    .then((res) => {
+      console.log(`Notification Status: ${res.status}`);
+      console.log('Notification Body: ', res.data);
+    }).catch((err) => {
+      console.error(err);
+    });
+}
+
+function send_watimessage(result,data){
+  console.log("inside wati message")
+  var access_token = result['product_token']
+  var cm_number = result['cm_number']
+  const headers = {
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer '+access_token
+    }
+  }
+  console.log("provider ",result['provider'])
+  console.log("endpoint ",result['endpoint'])
+  const body = {
+    to:data['user_number'],
+    type:"text",
+    text : {
+      body:data['message']
+    }
+  }
+  axios.post(result['endpoint']+'/v1/messages',body,headers)
+    .then((res) => {
+      console.log(`Status: ${res.status}`);
+      console.log('Body: ', res.data);
+    }).catch((err) => {
+      console.error(err);
+    });
+}
+
+function send_cmmessage(result,data){
+  var access_token = result['product_token']
+  var cm_number = result['cm_number']
+  console.log("access_token ", access_token)
+  console.log('cm_number ', cm_number)
+  console.log('user_number ', data['user_number'])
+  console.log('message ', data['message'])
+  const body = {
+    messages: {
+      authentication: {
+        productToken: access_token
+      },
+      msg: [{
+        body: {
+          type: 'auto',
+          content: 'Fallback text for SMS'
+        },
+        to: [{
+          number: data['device_print']
+        }],
+        from: cm_number,
+        allowedChannels: ["WhatsApp"],
+        richContent: {
+          conversation: [{
+            text: data["message"]
+          }]
+        }
+      }]
+    }
+  }
+  axios.post('https://gw.cmtelecom.com/v1.0/message', body)
+    .then((res) => {
+      console.log(`Status: ${res.status}`);
+      console.log('Body: ', res.data);
+    }).catch((err) => {
+      console.error(err);
+    });
+}
+
+function sendWhitelabelMail($agents_list){
+  var tomail = [];
+  for (var i = 0; i < agents_list.length; i++) {
+    tomail.push(agents_list[i]['email']);
+  }
+  let transport = nodemailer.createTransport({
+      host: 'smtp.office365.com',
+      port: 587,
+      auth: {
+         user: 'ecare@taleed.com.sa',
+         pass: 'T@leed#2021'
+      }
+  });
+  const message = {
+      from: 'ecare@taleed.com.sa', // Sender address
+      to: tomail,         // List of recipients
+      subject: 'You have a user waiting for you in Live Chat!!!', // Subject line
+      html: '<div style="width: 70%;margin-right: auto;margin-left: auto;float: none"><div style="float: left;margin-left: auto;margin-right: auto;width:100%;margin:0;font-family:trebuchet MS;border:1px solid lightgray"><div style="float: left;width:100%"><div style="width:100%;background:white;float:left;border-bottom: 1px solid lightgray"><div style="float:left;width:100%"><h2 style="float: left;min-width:98%;text-align: center;margin-left: 1%;margin-top:10px;margin-bottom:10px;margin-left:10px" class="logo"></h2></div></div><div style="float: left;width:100%;background:#1094d126;font-size:16px"><div style="width:90%;margin-left:5%;margin-right:5%;display:block;float:left;padding:10px;margin-top: 25px;margin-bottom: 25px;box-sizing: border-box"><label style="float:left;width:100%">Dear Customer,</label><label style="margin-top:15px;float:left;width:100%">A user is waiting for you to connect with them on Chatbot.</label><label style="margin-top:15px;float:left;width:100%">Please check immediately.</label><label style="margin-top:25px;float:left;width:100%">Thank you.<br></label></div></div></div></div></div>'// Plain text body
+  };
+  transport.sendMail(message, function(err, info) {
+      if (err) {
+        console.log(err)
+      } else {
+        console.log(info);
+      }
+  });
+}
+
 function sendGridEmailSending(agents_list,bot_name){
   var tomail = [];
   for(var i = 0; i < agents_list.length; i++){
@@ -434,7 +608,7 @@ function sendGridEmailSending(agents_list,bot_name){
       content: [
           {
               type: 'text/html',
-              value: '<div style="width: 70%;margin-right: auto;margin-left: auto;float: none"><div style="float: left;margin-left: auto;margin-right: auto;width:100%;margin:0;font-family:trebuchet MS;border:1px solid lightgray"><div style="float: left;width:100%"><div style="width:100%;background:white;float:left;border-bottom: 1px solid lightgray"><div style="float:left;width:100%"><h2 style="float: left;min-width:98%;text-align: center;margin-left: 1%;margin-top:10px;margin-bottom:10px;margin-left:10px" class="logo"><img src="https://s3.ap-south-1.amazonaws.com/custpostimages/sb_images/SB_logo_horizontal_text.png" height="60" alt=""></h2></div></div><div style="float: left;width:100%;background:#1094d126;font-size:16px"><div style="width:90%;margin-left:5%;margin-right:5%;display:block;float:left;padding:10px;margin-top: 25px;margin-bottom: 25px;box-sizing: border-box"><label style="float:left;width:100%">Dear Customer,</label><label style="margin-top:15px;float:left;width:100%">Hope <a href="https://www.smatbot.com/login" style="text-decoration:none" target="_blank">SmatBot</a> served you well.</label><label style="margin-top:15px;float:left;width:100%">A user is waiting for you to connect with them on '+ bot_name +' SmatBot.</label><label style="margin-top:15px;float:left;width:100%">Please check immediately.</label><label style="margin-top:25px;float:left;width:100%">Thank you,<br>SmatBot Team</label></div></div></div></div></div>'
+              value: '<div style="width: 70%;margin-right: auto;margin-left: auto;float: none"><div style="float: left;margin-left: auto;margin-right: auto;width:100%;margin:0;font-family:trebuchet MS;border:1px solid lightgray"><div style="float: left;width:100%"><div style="width:100%;background:white;float:left;border-bottom: 1px solid lightgray"><div style="float:left;width:100%"><h2 style="float: left;min-width:98%;text-align: center;margin-left: 1%;margin-top:10px;margin-bottom:10px;margin-left:10px" class="logo"><img src="https://s3.ap-south-1.amazonaws.com/custpostimages/sb_images/SB_logo_horizontal_text.png" height="60" alt=""></h2></div></div><div style="float: left;width:100%;background:#1094d126;font-size:16px"><div style="width:90%;margin-left:5%;margin-right:5%;display:block;float:left;padding:10px;margin-top: 25px;margin-bottom: 25px;box-sizing: border-box"><label style="float:left;width:100%">Dear Customer,</label><label style="margin-top:15px;float:left;width:100%">A user is waiting for you to connect with them on '+ bot_name +' SmatBot.</label><label style="margin-top:15px;float:left;width:100%">Please check immediately.</label><label style="margin-top:25px;float:left;width:100%">Thank you,<br>SmatBot Team</label></div></div></div></div></div>'
           }
       ]
     },

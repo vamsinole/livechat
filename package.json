@@ -9,8 +9,10 @@
     "knex": "^0.21.2",
     "mcrypt": "^0.1.17",
     "mysql": "^2.18.1",
+    "nodemailer": "^6.4.17",
     "request": "^2.88.2",
-    "socket.io": "^1.7.3"
+    "socket.io": "^1.7.3",
+    "twilio": "^3.49.4"
   },
   "scripts": {
     "start": "node index.js",

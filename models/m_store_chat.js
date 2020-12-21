@@ -29,8 +29,8 @@ module.exports = {
 		});
 	},
 	getWhatsappDetails: function(bot_id){
-		query = "SELECT product_token AS product_token,cm_number AS cm_number FROM whatsapp_bots WHERE chatbot_id=?";
-		return knex.select('product_token','cm_number').from('whatsapp_bots').where('chatbot_id',bot_id).then(data => data[0])
+		query = "SELECT product_token,provider,endpoint AS product_token,cm_number AS cm_number FROM whatsapp_bots WHERE chatbot_id=?";
+		return knex.select('product_token','cm_number','provider','endpoint').from('whatsapp_bots').where('chatbot_id',bot_id).then(data => data[0])
 		// return knex.raw(query,[bot_id]).then(function (resp){
 		// 	// console.log(resp[0])
 		// 	resp[0]
@@ -92,7 +92,7 @@ module.exports = {
 		});
 	},
 	userSeenMessage: function(session_id){
-		query = "UPDATE chats SET is_seen='1' WHERE type='customer' AND session_id=?";
+		query = "UPDATE chats SET is_seen='1' WHERE type='user' AND session_id=?";
 		console.log("user seen message event");
 		return new Promise(function (resolve, reject){
 			knex.raw(query, [session_id]).then(function (result){
@@ -101,7 +101,7 @@ module.exports = {
 		});
 	},
 	agentSeenMessage: function(session_id){
-		query = "UPDATE chats SET is_seen='1' WHERE type='user' AND session_id=?";
+		query = "UPDATE chats SET is_seen='1' WHERE type='customer' AND session_id=?";
 		console.log("agent seen message event");
 		return new Promise(function (resolve, reject){
 			knex.raw(query, [session_id]).then(function (result){
@@ -118,10 +118,26 @@ module.exports = {
 		});
 	},
 	getAgentsList: function(bot_id){
-		query = "SELECT c.email FROM customer_roles cr INNER JOIN customers c ON c.id=cr.role_customer_id WHERE admin_customer_id=(SELECT c.id FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?) UNION SELECT c.email FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?";
+		query = "SELECT c.email,c.phone_number FROM customer_roles cr INNER JOIN customers c ON c.id=cr.role_customer_id WHERE admin_customer_id=(SELECT c.id FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?) UNION SELECT c.email,c.phone_number FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?";
 		return new Promise(function (resolve, reject){
 			knex.raw(query, [bot_id,bot_id]).then(function (result){
 				resolve(result);
+			});
+		});
+	},
+	getCustomerType: function(bot_id){
+		query = "SELECT c.id,c.customer_type FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?";
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [bot_id]).then(function (result){
+				resolve(result[0]);
+			});
+		});
+	},
+	isWhatsappEnabled: function(bot_id){
+		query = "SELECT c.live_chat_whatsapp_notification FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?"
+		return new Promise(function (resolve, reject){
+			knex.raw(query, [bot_id]).then(function (result){
+				resolve(result[0]);
 			});
 		});
 	},
