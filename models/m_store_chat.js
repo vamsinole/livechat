@@ -36,11 +36,11 @@ module.exports = {
 		// 	resp[0]
 		// })
 	},
-	setSession: function(bot_id,session_id,ip_address="",user_location="",user_url=""){
-		query = "INSERT INTO live_chat_sessions (chatbot_id,session_id,ip_address,user_location,user_url) VALUES (?,?,?,?,?)";
+	setSession: function(bot_id,session_id,ip_address="",user_location="",user_url="",notes=""){
+		query = "INSERT INTO live_chat_sessions (chatbot_id,session_id,ip_address,user_location,user_url,notes) VALUES (?,?,?,?,?,?)";
 		console.log("inserting session");
 		return new Promise(function (resolve, reject){
-			knex.raw(query, [bot_id,session_id,ip_address,user_location,user_url]).then(function (result){
+			knex.raw(query, [bot_id,session_id,ip_address,user_location,user_url,notes]).then(function (result){
 				resolve(result);
 			});
 		});
@@ -121,7 +121,7 @@ module.exports = {
 		query = "SELECT c.email,c.phone_number FROM customer_roles cr INNER JOIN customers c ON c.id=cr.role_customer_id WHERE admin_customer_id=(SELECT c.id FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?) UNION SELECT c.email,c.phone_number FROM chatbots cb INNER JOIN customer_profiles cp ON cp.id=cb.customer_profile_id INNER JOIN customers c ON c.id=cp.customer_id WHERE cb.id=?";
 		return new Promise(function (resolve, reject){
 			knex.raw(query, [bot_id,bot_id]).then(function (result){
-				resolve(result);
+				resolve(result[0]);
 			});
 		});
 	},

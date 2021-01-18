@@ -6,7 +6,8 @@ const axios = require('axios');
 let m_storechat = require('./models/m_store_chat');
 var http = require('https').createServer({
   key: fs.readFileSync('/home/ubuntu/key.pem'),
-  cert: fs.readFileSync('/home/ubuntu/cert.pem')
+  cert: fs.readFileSync('/home/ubuntu/cert.pem'),
+  ca: fs.readFileSync('/home/ubuntu/cabundle.crt')
 }, app);
 var dir_name = '/home/ubuntu/test-project/'
 const AccessToken = require('twilio').jwt.AccessToken;
@@ -79,6 +80,12 @@ function startConnect() {
   socket.on('stop-screen-share', function(data) {
     io.sockets.emit('stop-screen-share', data);
   })
+  socket.on('agent-received', function(data) {
+    io.sockets.emit('agent-received', data);
+  })
+  socket.on('setagentsession', function(data) {
+    socket.join(data['bot_id']);
+  })
   socket.on('setUsername', function(data) {
     console.log(users);
     console.log(users.indexOf(data));
@@ -95,6 +102,10 @@ function startConnect() {
   socket.on('msg', function(data) {
     io.sockets.emit('newmsg', data);
   })
+  socket.on('testconnect', function(data) {
+    console.log('test connect data',data)
+    io.sockets.emit('testconnect', data);
+  })
   socket.on('sendtoadmin', function(data) {
     io.sockets.emit('sendtoadmin', data);
   })
@@ -109,7 +120,8 @@ function startConnect() {
       session_id = decrypt(data["session_id"]);
     }
     console.log("admin message bot id ", data)
-    io.sockets.emit('adminsentmessage', data);
+    io.to(data['chatbot_id']).emit('adminsentmessage', data);
+    // io.sockets.emit('adminsentmessage', data);
     var customer_id = "";
     Promise.resolve(m_storechat.getCustomerId(data["chatbot_id"])).then(function(result) {
       customer_id = result["customer_id"];
@@ -126,7 +138,7 @@ function startConnect() {
         else if(result['provider'] == "wati"){
           send_message = send_watimessage(result,data)
         }
-        
+
       })
     }
   })
@@ -157,7 +169,8 @@ function startConnect() {
       data["session_id"] = session_id
     }
     console.log("user message data ", data)
-    io.sockets.emit('usersentmessage', data);
+    io.to(data['bot_id']).emit('usersentmessage', data);
+    // io.sockets.emit('usersentmessage', data);
     var customer_id = "";
     Promise.resolve(m_storechat.getCustomerId(data["bot_id"])).then(function(result) {
       customer_id = result["customer_id"];
@@ -180,11 +193,13 @@ function startConnect() {
   })
   socket.on('setsession', function(data) {
     session_id = decrypt(data["session_id"]);
+    socket.join(data['bot_id']);
     if (data['channel'] == 'whatsapp') {
       data['cb_session'] = data['session_id']
       data['session_id'] = session_id
       console.log("set session ", data)
-      io.sockets.emit('setsession', data);
+      io.to(data['bot_id']).emit('setsession', data);
+      // io.sockets.emit('setsession', data);
       Promise.resolve(m_storechat.checkSession(session_id)).then(function(result) {
         if (result[0].length > 0) {
           console.log("session already there")
@@ -199,23 +214,24 @@ function startConnect() {
       data['ip_address'] = decrypt(data['ip_address'])
       data['user_location'] = decrypt(data['user_location'])
       console.log("set session ", data)
+      io.to(data['bot_id']).emit('setsession', data);
+      // io.sockets.emit('setsession', data);
       Promise.resolve(m_storechat.checkSession(session_id)).then(function(result) {
         if (result[0].length > 0) {
           console.log("session already there")
         } else {
           console.log("no session so inserting")
-          Promise.resolve(m_storechat.setSession(data["bot_id"], session_id, data["ip_address"], data["user_location"], data["user_url"])).then(function(result) {
+          Promise.resolve(m_storechat.setSession(data["bot_id"], session_id, data["ip_address"], data["user_location"], data["user_url"],data['notes'])).then(function(result) {
 
           })
         }
       })
     }
-    io.sockets.emit('setsession', data);
     Promise.resolve(m_storechat.isWhatsappEnabled(data['bot_id'])).then(function(res){
       is_whatsapp_enabled = res[0]['live_chat_whatsapp_notification']
       if(is_whatsapp_enabled == '1'){
         Promise.resolve(m_storechat.getAgentsList(data["bot_id"])).then(function(resp){
-          agents_list = resp[0];
+          var agents_list = resp;
           Promise.resolve(m_storechat.getWhatsappDetails("5354")).then(function(result){
             for(i=0;i<agents_list.length;i++){
               sendWhatsappNotification(agents_list[i]['phone_number'],result,data['bot_name'])
@@ -233,7 +249,7 @@ function startConnect() {
         Promise.resolve(m_storechat.getAgentsList(data["bot_id"])).then(function(result){
           agents_list = result;
           if(customer_type[0]['id'] == '4473'){
-            sendWhitelabelMail(agents_list[0],function(error, response){
+            sendWhitelabelMail(agents_list,function(error, response){
               if(error){
                 console.log("Talal email sending error");
               }
@@ -243,7 +259,7 @@ function startConnect() {
             })
           }
           else{
-            sendGridEmailSending(agents_list[0],data['bot_name'],function (error, response){
+            sendGridEmailSending(agents_list,data['bot_name'],function (error, response){
               if(error){
                 console.log("sendgrid email sending error");
               }
@@ -422,6 +438,12 @@ function startConnect() {
 
     })
   })
+  socket.on('setstatus', function(data) {
+    io.sockets.emit('setstatus', data)
+    Promise.resolve(m_storechat.saveAgentStatus(data['agent_id'], data['status'])).then(function(result) {
+
+    })
+  })
   socket.on('banip', function(data) {
     io.sockets.emit('banip', data)
   })
@@ -453,6 +475,7 @@ function sendWhatsappNotification(number,data,bot_name){
       'Authorization':'Bearer '+access_token
     }
   }
+  console.log("whatsapp number",number)
   number = number.replace("+","");
   number = number.replace("-","");
   const body = {
@@ -571,7 +594,7 @@ function sendWhitelabelMail($agents_list){
       from: 'ecare@taleed.com.sa', // Sender address
       to: tomail,         // List of recipients
       subject: 'You have a user waiting for you in Live Chat!!!', // Subject line
-      html: '<div style="width: 70%;margin-right: auto;margin-left: auto;float: none"><div style="float: left;margin-left: auto;margin-right: auto;width:100%;margin:0;font-family:trebuchet MS;border:1px solid lightgray"><div style="float: left;width:100%"><div style="width:100%;background:white;float:left;border-bottom: 1px solid lightgray"><div style="float:left;width:100%"><h2 style="float: left;min-width:98%;text-align: center;margin-left: 1%;margin-top:10px;margin-bottom:10px;margin-left:10px" class="logo"></h2></div></div><div style="float: left;width:100%;background:#1094d126;font-size:16px"><div style="width:90%;margin-left:5%;margin-right:5%;display:block;float:left;padding:10px;margin-top: 25px;margin-bottom: 25px;box-sizing: border-box"><label style="float:left;width:100%">Dear Customer,</label><label style="margin-top:15px;float:left;width:100%">A user is waiting for you to connect with them on Chatbot.</label><label style="margin-top:15px;float:left;width:100%">Please check immediately.</label><label style="margin-top:25px;float:left;width:100%">Thank you.<br></label></div></div></div></div></div>'// Plain text body
+      html: '<div style="width: 70%;margin-right: auto;margin-left: auto;float: none"><div style="float: left;margin-left: auto;margin-right: auto;width:100%;margin:0;font-family:trebuchet MS;border:1px solid lightgray"><div style="float: left;width:100%"><div style="width:100%;background:white;float:left;border-bottom: 1px solid lightgray"><div style="float:left;width:100%"><h2 style="float: left;min-width:98%;text-align: center;margin-left: 1%;margin-top:10px;margin-bottom:10px;margin-left:10px" class="logo"></h2></div></div><div style="float: left;width:100%;background:#1094d126;font-size:16px"><div style="width:90%;margin-left:5%;margin-right:5%;display:block;float:left;padding:10px;margin-top: 25px;margin-bottom: 25px;box-sizing: border-box"><label style="float:left;width:100%">Dear Customer,</label><label style="margin-top:15px;float:left;width:100%">A user is waiting for you to connect with them on Chatbot.</label><label style="margin-top:15px;float:left;width:100%">Please check <a href="https://www.app.smatbot.com/bot?tab=live_chat&bot_id=5625&profile_id=4239" target="_blank">here</a> immediately.</label><label style="margin-top:25px;float:left;width:100%">Thank you.<br></label></div></div></div></div></div>'// Plain text body
   };
   transport.sendMail(message, function(err, info) {
       if (err) {
