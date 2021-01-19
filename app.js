@@ -9,8 +9,7 @@ var http = require('https').createServer({
   cert: fs.readFileSync('/home/ubuntu/certs/smatbotcert.pem'),
   ca: fs.readFileSync('/home/ubuntu/certs/smatbotbundle.crt')
 }, app);
-var dir_name = '/home/ubuntu/live_chat/'
-const AccessToken = require('twilio').jwt.AccessToken;
+var dir_name = '/home/ubuntu/live_chat/'ken;
 const VideoGrant = AccessToken.VideoGrant;
 
 const twilioAccountSid = 'AC63f423bcdcf304c0c3a8cdc674083708';
