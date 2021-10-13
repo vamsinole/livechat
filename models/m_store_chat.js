@@ -50,6 +50,49 @@ module.exports = {
 			});
 		});
 	},
+	storeDeviceToken: function(device_token, agent_id) {
+		console.log("Device Token ------>", device_token);
+		var first_check_query = "SELECT * from agent_app_details where agent_id=?";
+		return new Promise(function(resolve, reject) {
+				knex.raw(first_check_query, [agent_id]).then(function(result) {
+					result[0] = result[0] || {}
+					console.log(result[0]);
+					if (result[0] && result[0].length > 0) {
+						console.log('already exists ->',result[0]);
+						if (result[0][0].fcm_device_token == device_token) {
+							console.log('same thing so leaving it as it is');
+						}
+						else {
+							if (device_token && device_token.length > 0) {
+								query = "UPDATE agent_app_details SET fcm_device_token=? where agent_id=?";
+								return new Promise(function(resolve, reject) {
+										knex.raw(query, [device_token, agent_id]).then(function(result) {
+												resolve(result[0]);
+										});
+								});
+							}
+						}
+					}
+					else {
+						query = "INSERT INTO agent_app_details (agent_id,fcm_device_token) VALUES (?,?)";
+						return new Promise(function(resolve, reject) {
+								knex.raw(query, [agent_id, device_token]).then(function(result) {
+										resolve(result[0]);
+								});
+						});
+					}
+				});
+		});
+	},
+	getDeviceTokens: function(agent_id) {
+		console.log("Agent Id ------>", agent_id);
+		query = "SELECT fcm_device_token from agent_app_details where agent_id=?";
+		return new Promise(function(resolve, reject) {
+				knex.raw(query, [agent_id]).then(function(result) {
+						resolve(result[0]);
+				});
+		});
+	},
 	checkSession: function(session_id){
 		query = "SELECT * FROM live_chat_sessions WHERE session_id=?";
 		return new Promise(function (resolve, reject){

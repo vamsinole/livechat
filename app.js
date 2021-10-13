@@ -6,6 +6,7 @@ const request = require('request')
 const axios = require('axios');
 let moment = require('moment-timezone');
 let m_storechat = require('./models/m_store_chat');
+
 var http = require('https').createServer({
     key: fs.readFileSync('/home/ubuntu/certs/smatbotkey.pem'),
     cert: fs.readFileSync('/home/ubuntu/certs/smatbotcert.pem'),
@@ -14,15 +15,34 @@ var http = require('https').createServer({
 var dir_name = '/home/ubuntu/live_chat_dev/'
 const AccessToken = require('twilio').jwt.AccessToken;
 const VideoGrant = AccessToken.VideoGrant;
+//const nodemailer = require("nodemailer");
+const transporter = nodemailer.createTransport({
+  // host: "smtp.ethereal.email",
+  // port: 587,
+  // auth: {
+  //   user: "<email>",
+  //   pass: "<password>",
+  // },
+    host: 'smtp.office365.com',
+    port: 587,
+    auth: {
+        user: 'hrcare@taleed.com.sa',
+        pass: 'T@leed4321'
+    }
+});
+const Json2csvParser = require('json2csv').Parser;
 
 const twilioAccountSid = 'AC63f423bcdcf304c0c3a8cdc674083708';
 const twilioApiKey = 'SK5f4cadbd99aa358cee794cd84bd15633';
 const twilioApiSecret = 'rKSM1dKB5jwc0O1Vw5dSS738HKg6IO6I';
+const FCM = require('fcm-node');
+const serverKey = 'AAAAGbCwI70:APA91bH8LHf64_AUb_hWFUIfcXi4L10X30a2CL9it6CiPG84uJXB2j1YBw5uFKWN0rorNuGR6wdDz2XcxTO6nwVUkm1Nte1AN4KzmWP5GpjxWIQUZeGw-CKmMniO4CEyr7IERAsVNIfm'
 var io = require('socket.io')(http, {
     pingTimeout: 60000,
     pingInterval: 25000,
     origins: '*:*'
 });
+var registered_devices = ['puZ5rlfa1LQxpsqxMvAicifk3wYiHgSsBeWC1c2QfqNG77uONXNSMoAcN_zt-nKa'];
 
 app.get('/', function(req, res) {
     res.sendFile(__dirname + '/index.html');
@@ -121,6 +141,12 @@ function startConnect() {
         socket.on('sendtoadmin', function(data) {
             io.sockets.emit('sendtoadmin', data);
         })
+        socket.on('senddevicetoken', function(data) {
+          console.log("registered device token : ", data)
+          // registered_devices.push(data['devicetoken']);
+          Promise.resolve(m_storechat.storeDeviceToken(data['devicetoken'],data['agent_id'])).then(function(result) {
+          })
+        })
         socket.on('adminsentmessage', function(data) {
             if (data["channel"] == "whatsapp" && data["session_id"].length > 10) {
                 console.log("channel is whatsapp and length is mpre than 10")
@@ -190,6 +216,7 @@ function startConnect() {
         socket.on('usersentmessage', function(data) {
             session_id = decrypt(data["session_id"]);
             console.log("user message data ", data);
+            var agent_ids;
             if (data['channel'] == 'whatsapp') {
                 data["session_id"] = session_id;
                 Promise.resolve(m_storechat.getAgentId(session_id)).then(function(result) {
@@ -216,6 +243,41 @@ function startConnect() {
             Promise.resolve(m_storechat.updateCounter(session_id)).then(function(result) {
 
             })
+            if (agent_ids) {
+              Promise.resolve(m_storechat.getDeviceTokens(agent_ids[0])).then(function(result) {
+                var arr = [];
+                for (var i = 0; i < result.length; i++) {
+                  arr.push(result[i].fcm_device_token);
+                }
+                const fcm = new FCM(serverKey);
+                console.log('result from db agent_app details ',arr);
+                var message = {
+                  registration_ids: arr,
+                  notification: {
+                    title: 'SmatBot - New User',
+                    body: 'A new message came to your ' + data["bot_id"] + ' live chat from ' + data['channel'],
+                    sound: "default",
+                    icon: "ic_launcher",
+                    click_action:"FCM_PLUGIN_ACTIVITY",
+                    badge: "1"
+                  },
+                  priority: 'high',
+                  data:{
+                    landing_page:"chatmessenger",
+                    id: agent_ids[0]
+                  },
+                }
+                fcm.send(message, (err, response) => {
+                  if (err) {
+                    console.log("Something has gone wrong! push notification : ", JSON.stringify(err));
+                    // res.send(err);
+                  } else {
+                    console.log("Successfully sent with response: push notification ", response);
+                    // res.send(response)
+                  }
+                })
+              })
+            }
         })
         socket.on('admintyping', function(data) {
             io.to(data['session_id']).emit('admintyping', data);
@@ -279,6 +341,43 @@ function startConnect() {
                     console.log('agentassigned data ', { agent_id: assigned_agent, 'channel': data['channel'], 'session_id': data['session_id'] })
                     io.to(data['session_id']).emit('agentassigned', { agent_id: assigned_agent, 'channel': data['channel'], 'session_id': data['session_id'] })
                     Promise.resolve(m_storechat.updateAgentChats(assigned_agent, data['bot_id'], 'add')).then(function(result) {})
+                    Promise.resolve(m_storechat.getDeviceTokens(assigned_agent)).then(function(result) {
+                      var arr = [];
+                      for (var i = 0; i < result.length; i++) {
+                        arr.push(result[i].fcm_device_token);
+                      }
+                      const fcm = new FCM(serverKey);
+                      console.log('result from db agent_app details ',arr);
+                      var message = {
+                        registration_ids: arr,
+                        notification: {
+                          title: 'SmatBot - New User',
+                          body: 'A new user come to your live chat from ' + data['channel'],
+                          sound: "default",
+                          icon: "ic_launcher",
+                          badge: "1",
+                          click_action:"FCM_PLUGIN_ACTIVITY",
+                        },
+                        data:{
+                          landing_page:"active-users",
+                          id: assigned_agent
+                        },
+                        priority: 'high',
+                        data: {
+                          // action: req.body.actionType, // Action Type
+                          // payload: req.body.payload // payload
+                        }
+                      }
+                      fcm.send(message, (err, response) => {
+                        if (err) {
+                          console.log("Something has gone wrong! push notification : ", JSON.stringify(err));
+                          // res.send(err);
+                        } else {
+                          console.log("Successfully sent with response: push notification ", response);
+                          // res.send(response)
+                        }
+                      })
+                    })
                 } else {
                     is_agent_available = false;
                     console.log("this is else in no agent available", data);
@@ -366,7 +465,7 @@ function startConnect() {
                         if (customer_type[0]['id'] == '4473') {
                             sendWhitelabelMail([{ email: assigned_agent_email }], function(error, response) {
                                 if (error) {
-                                    console.log("Talal email sending error");
+                                    console.log("Talal email sending error",error);
                                 } else {
                                     console.log("Tala email sending no error");
                                 }
@@ -809,7 +908,7 @@ function send_cmmessage(result, data) {
         });
 }
 
-function sendWhitelabelMail($agents_list) {
+function sendWhitelabelMail(agents_list) {
     var tomail = [];
     for (var i = 0; i < agents_list.length; i++) {
         tomail.push(agents_list[i]['email']);
@@ -891,5 +990,5 @@ io.on('close', function(socket) {
 startConnect();
 
 http.listen(8000, function() {
-    console.log('listening on *:8001');
+    console.log('listening on *:8000');
 });
