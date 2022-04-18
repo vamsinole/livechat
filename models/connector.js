@@ -2,9 +2,9 @@ var mysql      = require('mysql');
 var knex = require('knex')({
     client: 'mysql',
     connection: {
-        host     : 'database-1.cg2r5ldsrbwr.us-east-1.rds.amazonaws.com',
-        user     : 'smatbot',
-        password : 'Botdbpass$456',
+        host     : 'rdsmumbai.cqn51gees35x.ap-south-1.rds.amazonaws.com',
+        user     : 'Livechat_user',
+        password : 'L1vech@t#32',
         database : 'smatbot_main'
     }
 });
