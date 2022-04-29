@@ -20,21 +20,6 @@ const AccessToken = require("twilio").jwt.AccessToken;
 const VideoGrant = AccessToken.VideoGrant;
 //const nodemailer = require("nodemailer");
 
-const transporter = nodemailer.createTransport({
-  // host: "smtp.ethereal.email",
-  // port: 587,
-  // auth: {
-  //   user: "<email>",
-  //   pass: "<password>",
-  // },
-  host: "smtp.office365.com",
-  port: 587,
-  auth: {
-    user: "hrcare@taleed.com.sa",
-    pass: "T@leed4321",
-  },
-});
-const Json2csvParser = require("json2csv").Parser;
 
 const twilioAccountSid = "AC63f423bcdcf304c0c3a8cdc674083708";
 const twilioApiKey = "SK5f4cadbd99aa358cee794cd84bd15633";
@@ -42,54 +27,32 @@ const twilioApiSecret = "rKSM1dKB5jwc0O1Vw5dSS738HKg6IO6I";
 const FCM = require("fcm-node");
 const serverKey =
   "AAAAfgKVySk:APA91bHO_OWD39viqnJWknyBLPw2bZnP9HEADKVVxRfXPIpOuZa2yTUdjN09JLX7ZC_neYK528-kl413y3n4D_yzrJtpPU-gwazonUv92MUnZkl7Ork83DMmYMVOhl0r6jD_Ggvhl3Ue";
+
 var io = require("socket.io")(http, {
   pingTimeout: 60000,
   pingInterval: 25000,
   origins: "*:*",
 });
+
 var registered_devices = [
   "puZ5rlfa1LQxpsqxMvAicifk3wYiHgSsBeWC1c2QfqNG77uONXNSMoAcN_zt-nKa",
 ];
+
 const log = require('./utils/logger');
 
+const closeSessionRouter = require('./routes/closeSessions')
+app.use(closeSessionRouter)
 
-function sendHeartbeat() {
-  setTimeout(sendHeartbeat, 5000);
-  io.sockets.emit("ping", { beat: 1 });
-}
-setTimeout(sendHeartbeat, 5000);
-app.get("/", function (req, res) {
-  res.sendFile(__dirname + "/index.html");
-});
+const closeSessionCron = require('./jobs/closeSessionsCron.js')
+closeSessionCron.start()
 
-app.get("/getToken", function (req, res) {
-  var token = new AccessToken(twilioAccountSid, twilioApiKey, twilioApiSecret);
-  log.info("get_available_agents:: 451" + JSON.stringify(token));
-  token.identity = req.query.identity;
-  const videoGrant = new VideoGrant({
-    room: req.query.room,
-  });
-  token.addGrant(videoGrant);
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.json({ token_twilio: token.toJwt() });
-});
 
-app.get("/status", (req, res) => {
-  res.sendStatus(200);
-});
+const redis_client = require('../cinepolis/redis.js');
+const { doRequest } = require("./utils/doRequest");
 
-app.post("/simvolyWebhook", async (req, res) => {
-  try {
-    console.log("Post webhook call");
-    console.log(req.query);
-    res.sendStatus(200);
-  } catch (err) {
-    console.log(err, "errrrrr");
-  }
-});
 
 var decrypt = function (text) {
-  if (text.length <= 0 || text == null || text == undefined) return;
+  if (text == null || text.length <= 0 || text == undefined) return;
   var MCrypt = require("mcrypt").MCrypt;
   var rijEcb = new MCrypt("rijndael-128", "cbc");
   console.log("=========>before bufrfer" + text);
@@ -116,15 +79,44 @@ users = [];
 var if_connected;
 
 function startConnect() {
+
+
   io.on("connection", async function (socket) {
     var url_str = socket.handshake.url;
     var queryObj = url.parse(url_str, { parseQueryString: true }).query;
-    if (queryObj && queryObj.sId && queryObj.sId.length > 0) {
-      console.log("socket id is : ", queryObj);
+    console.log("socket id is : ", queryObj);
+
+    if (queryObj && queryObj.agentId && queryObj.agentId.length > 0) {
       if (queryObj.type == "agent") {
         console.log(queryObj)
-        if (queryObj.sId) {
-          await socket.join(queryObj.sId);
+        if (queryObj.agentId) {
+
+          await socket.join(queryObj.agentId);
+
+          console.log(queryObj.agentId)
+
+          let user_sessions = await redis_client.getAsync(queryObj.agentId)
+          console.log(user_sessions)
+
+
+          if (user_sessions) {
+
+            user_sessions = JSON.parse(user_sessions.set_session)
+            if (!Array.isArray(user_sessions)) return
+
+            if (user_sessions) {
+
+              user_sessions.forEach((user_session) => {
+                io.to(queryObj.agentId).emit('setsession', user_session)
+                io.to(user_session.session_id).emit('setsession', user_session)
+
+              })
+
+            }
+
+          }
+          await redis_client.del(queryObj.agentId)
+
         }
 
       }
@@ -134,12 +126,76 @@ function startConnect() {
     socket.on("start-video", function (data) {
       io.to(data["agent_id"]).emit("start-video", data);
     });
+    socket.on("reloadpage", async function (data) {
+      console.log("in reload page event", data)
+
+      if (data["channel"] == "whatsapp") {
+
+        // session_id = data['session_id']
+        let chatbot_details = await m_storechat.getWhatsappDetails(data['chatbot_id'])
+        data['message'] = "This conversation has been auto-closed as there has been no response from both the sides."
+        // if (!Array.isArray(chatbot_details)) {
+        //   return
+        // }
+        // chatbot_details = chatbot_details[0]
+
+        if (chatbot_details["provider"] == "cm.com") {
+          send_message = send_cmmessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "wati") {
+          send_message = send_watimessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "netcore") {
+          send_message = send_netcoremessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "360dialog") {
+          send_message = send_360message(chatbot_details, data);
+        }
+
+        io.to(data["agent_id"]).emit("autoclose", data);
+
+        return
+
+      }
+      io.to(data["agent_id"]).emit("autoclose", data);
+      io.to(data['session_id']).emit('autoclose', data);
+
+    });
+    socket.on("chatclosingreminder", async function (data) {
+      console.log("in reminder page event", data)
+      if (data["channel"] == "whatsapp") {
+
+        // session_id = data['session_id']
+        let chatbot_details = await m_storechat.getWhatsappDetails(data['chatbot_id'])
+        data['message'] = "This chat will be closed in 1 min."
+        // if (!Array.isArray(chatbot_details)) {
+        //   return
+        // }
+        // chatbot_details = chatbot_details[0]
+        console.log(chatbot_details)
+        if (chatbot_details["provider"] == "cm.com") {
+          send_message = send_cmmessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "wati") {
+          send_message = send_watimessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "netcore") {
+          send_message = send_netcoremessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "360dialog") {
+          send_message = send_360message(chatbot_details, data);
+        }
+        io.to(data["agent_id"]).emit("chatclosingreminder", data);
+
+        return
+      }
+      io.to(data["agent_id"]).emit("chatclosingreminder", data);
+      io.to(data['session_id']).emit('chatclosingreminder', data);
+
+
+    });
+
     socket.on("video-declined", function (data) {
       io.to(data["session_id"]).emit("video-declined", data);
     });
     socket.on("video-disconnect", function (data) {
       io.sockets.emit("video-disconnect", data);
     });
+
     socket.on("start-screen-share", function (data) {
       io.sockets.emit("start-screen-share", data);
     });
@@ -154,6 +210,7 @@ function startConnect() {
       log.info("Joining the agent to room event 'setagentsession' ", JSON.stringify(data))
       console.log("socket id in set agent session ", data);
     });
+
     socket.on("setUsername", function (data) {
       console.log(users);
       console.log(users.indexOf(data));
@@ -166,10 +223,11 @@ function startConnect() {
       } else {
         socket.emit(
           "userExists",
-          data + " username is taken! Try some other username."
+          data + " username is taken! Try some other username. "
         );
       }
     });
+
     socket.on("msg", function (data) {
       io.sockets.emit("newmsg", data);
     });
@@ -187,95 +245,129 @@ function startConnect() {
         m_storechat.storeDeviceToken(data["devicetoken"], data["agent_id"])
       ).then(function (result) { });
     });
-    socket.on("pong", function (data) {
-      console.log("Pong received from client");
-    });
 
     socket.on("adminsentmessage", async function (data) {
 
       let room1 = io.sockets.adapter.rooms;
+      let session_id
+
+      // log.info("admin sent message :: " + JSON.stringify(data))
+      // log.info("admin sent message : sending to - " + data["agent_id"] + " : all connected rooms : " + JSON.stringify(room1))
 
 
-      log.info("admin sent message :: " + JSON.stringify(data))
-      log.info("admin sent message : sending to - " + data["agent_id"] + " : all connected rooms : " + JSON.stringify(room1))
+      // console.log(data)
 
-      room1 = io.sockets.adapter.rooms;
-      let rooms = Object.keys(room1)
-      let flag = false
 
-      rooms.forEach((room) => {
 
-        if (room == data['agent_id']) {
 
-          flag = true
+      if (data["channel"] == "whatsapp") {
 
+        session_id = data['session_id']
+        let chatbot_details = await m_storechat.getWhatsappDetails(data['chatbot_id'])
+        console.log(chatbot_details)
+        // if (!Array.isArray(chatbot_details)) {
+        //   console.log("===============> in whatsapp")
+
+        //   return
+        // }
+        // chatbot_details = chatbot_details[0]
+        console.log("================>" + JSON.stringify(chatbot_details))
+        if (chatbot_details["provider"] == "cm.com") {
+          send_message = send_cmmessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "wati") {
+          send_message = send_watimessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "netcore") {
+          send_message = send_netcoremessage(chatbot_details, data);
+        } else if (chatbot_details["provider"] == "360dialog") {
+          send_message = send_360message(chatbot_details, data);
         }
+        // io.to(data['agent_id']).emit('adminsentmessage', data)
 
-      })
-      if (!flag) {
-        await socket.join(data['agent_id']);
-      }
 
-      if (data["channel"] == "whatsapp" && data["session_id"].length > 10) {
-        console.log("channel is whatsapp and length is mpre than 10");
-        session_id = decrypt(data["session_id"]);
-      } else if (
-        data["channel"] == "whatsapp" &&
-        data["session_id"].length < 10
-      ) {
-        console.log("channel is whatsapp and length is less than 10");
-        session_id = data["session_id"];
-      } else {
-        session_id = decrypt(data["session_id"]);
       }
       if (data["channel"] == "website") {
         io.to(data["session_id"]).emit("adminsentmessage", data);
-        Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
-          result
-        ) {
-          agent_ids = result[0]["agent_ids"].toString().split(",");
-          agent_ids.forEach((agent_id) => {
-            if (agent_id != data["agent_id"]) {
-              io.to(agent_id).emit("adminsentmessage", data);
-            }
-          });
-        });
-      }
-      // io.sockets.emit('adminsentmessage', data);
-      var customer_id = "";
-      Promise.resolve(m_storechat.getCustomerId(data["chatbot_id"])).then(
-        function (result) {
-          customer_id = result["customer_id"];
-        }
-      );
-      Promise.resolve(
-        m_storechat.storeChat(
-          session_id,
-          "205",
-          data["message"],
-          "customer",
-          data["agent_name"]
-        )
-      ).then(function (result) { });
-      if (data["channel"] == "whatsapp") {
-        Promise.resolve(
-          m_storechat.getWhatsappDetails(data["chatbot_id"])
-        ).then(function (result) {
-          console.log("inside channel whatsapp", result);
-          if (result["provider"] == "cm.com") {
-            send_message = send_cmmessage(result, data);
-          } else if (result["provider"] == "wati") {
-            send_message = send_watimessage(result, data);
-          } else if (result["provider"] == "netcore") {
-            send_message = send_netcoremessage(result, data);
-          } else if (result["provider"] == "360dialog") {
-            send_message = send_360message(result, data);
+
+        session_id = decrypt(data['session_id'])
+        room1 = io.sockets.adapter.rooms;
+        let rooms = Object.keys(room1)
+        let flag = false
+
+        rooms.forEach((room) => {
+
+          if (room == data['agent_id']) {
+
+            flag = true
+
           }
-        });
+
+        })
+        if (!flag) {
+
+
+
+          await socket.join(data['agent_id']);
+
+        }
+
+        let agent_ids
+        if (data["agent_id"] == null || data["agent_id"] == undefined || data["agent_id"].length == 2) {
+          agent_ids = await m_storechat.getAgentId(session_id)
+          if (!Array.isArray(agent_ids)) {
+            log.error('Error fetching data from database :: ' + agent_ids)
+            return
+          }
+
+          data['agent_id'] = agent_ids[0].agent_ids
+          console.log(agent_ids)
+        }
+        // let agent_id = agent_ids[0]
+
+        // io.to(data['agent_id']).emit('adminsentmessage', data)
+
+
       }
-    });
+
+
+      // if (data["channel"] == "instagram") {
+      //   if (data["message"].includes(".jpg")) {
+      //     data["message"] = data["message"].split(";;")[1];
+      //   }
+
+      //   console.log(data);
+      //   // process.exit();
+      //   await instagram_send_message(data["device_print"], data["message"]);
+      //   // await reply(data['device_print'],data['message'],)
+      // }
+      // if (data["channel"] == "messenger") {
+      //   if (data["message"].includes(".jpg")) {
+      //     data["message"] = data["message"].split(";;")[1];
+      //   }
+
+      //   console.log(data);
+      //   // process.exit();
+      //   await messenger_send_message(data["device_print"], data["message"]);
+      //   // await reply(data['device_print'],data['message'],)
+      // }
+
+      console.log(session_id, data['agent_id'], data["message"], "customer", data["agent_name"])
+
+      await m_storechat.storeChat(session_id, data['agent_id'], data["message"], "customer", data["agent_name"])
+
+
+      let date = new Date()
+
+      await redis_client.setAsync(session_id, "last_update", "" + date.getTime())
+
+
+
+    })
+
+
+
 
     socket.on("adminsentmessagetoadmins", function (data) {
+
       if (data["channel"] == "whatsapp" && data["session_id"].length > 10) {
         console.log("channel is whatsapp and length is mpre than 10");
         session_id = decrypt(data["session_id"]);
@@ -299,7 +391,7 @@ function startConnect() {
       Promise.resolve(
         m_storechat.storeChat(
           session_id,
-          "205",
+          data['agent_id'],
           data["message"],
           "admintoadmin",
           data["agent_name"]
@@ -307,28 +399,41 @@ function startConnect() {
       ).then(function (result) { });
     });
 
+
+
+
     socket.on("usersentmessage", async function (data) {
 
 
       log.info("user sent message :: " + JSON.stringify(data))
+      console.log(JSON.stringify(data))
+      let session_id = decrypt(data["session_id"]);
 
-      session_id = decrypt(data["session_id"]);
-      console.log("user message data ", data);
       var agent_ids;
-      if (data["channel"] == "whatsapp") {
+      if (data["channel"] == "whatsapp" || data["channel"] == "instagram" ||
+        data["channel"] == "messenger") {
         data["session_id"] = session_id;
-        Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
-          result
-        ) {
-          agent_ids = result[0]["agent_ids"].toString().split(",");
-          agent_ids.forEach((agent_id) => {
-            io.to(agent_id).emit("usersentmessage", data);
-          });
-        });
+
+
+        if (data["agent_id"] == null || data["agent_id"] == undefined || data["agent_id"].length == 2) {
+          let agent_ids = await m_storechat.getAgentId(session_id)
+          if (!Array.isArray(agent_ids)) {
+            log.error('Error fetching data from database :: ' + agent_ids)
+            console.log(agent_ids)
+            return
+          }
+
+          data['agent_id'] = agent_ids[0].agent_ids
+          console.log(agent_ids)
+        }
+        io.to(data['agent_id']).emit('usersentmessage', data)
+
+
+
+
       } else {
-
+        session_id = decrypt(data["session_id"]);
         let room1 = io.sockets.adapter.rooms;
-
         log.info("user sent message : sending to - " + data["agent_id"] + " : all connected rooms : " + JSON.stringify(room1))
 
         room1 = io.sockets.adapter.rooms;
@@ -346,34 +451,39 @@ function startConnect() {
 
         })
         if (!flag) {
-
+          console.log("oin room createion")
           await socket.join(data['session_id']);
 
         }
 
-        if (data["agent_id"]) {
-          agent_ids = data["agent_id"].toString().split(",");
-          agent_ids.forEach((agent_id) => {
-            io.to(agent_id).emit("usersentmessage", data);
-          });
+
+
+        if (data["agent_id"] == null || data["agent_id"] == undefined || data["agent_id"].length == 2) {
+          let agent_ids = await m_storechat.getAgentId(session_id)
+          console.log("in get agent id ==================================>")
+          if (!Array.isArray(agent_ids)) {
+            log.error('Error fetching data from database :: ' + agent_ids)
+            return
+          }
+          data['agent_id'] = agent_ids[0].agent_ids
+          console.log(agent_ids)
         }
 
+        console.log("===================>event triggered")
+        io.to(data['agent_id'].toString()).emit("usersentmessage", data);
+
       }
-      // io.to(socket.id).emit('usersentmessage', data);
-      // io.sockets.emit('usersentmessage', data);
-      var customer_id = "";
-      Promise.resolve(m_storechat.getCustomerId(data["bot_id"])).then(function (
-        result
-      ) {
-        customer_id = result["customer_id"];
-      });
-      Promise.resolve(
-        m_storechat.storeChat(session_id, "205", data["message"], "user")
-      ).then(function (result) { });
-      Promise.resolve(m_storechat.updateCounter(session_id)).then(function (
-        result
-      ) { });
+
+
+      await m_storechat.storeChat(session_id, data['agent_id'], data["message"], "user")
+
+
+      await m_storechat.updateCounter(session_id)
+
+
+
       if (agent_ids) {
+
         Promise.resolve(m_storechat.getDeviceTokens(agent_ids[0])).then(
           function (result) {
             var arr = [];
@@ -419,22 +529,30 @@ function startConnect() {
             });
           }
         );
+
       }
+
+      const d = new Date();
+      let time = d.getTime();
+
+      redis_client.setAsync(session_id, "last_update", "" + time)
+
+
     });
 
     socket.on("admintyping", function (data) {
 
       log.info("admin typing :: " + JSON.stringify(data))
-
       io.to(data["session_id"]).emit("admintyping", data);
+
     });
 
     socket.on("admintypingstopped", function (data) {
 
       log.info("admin typing stopped :: " + JSON.stringify(data))
 
-      io.to(data["session_id"]).emit("admintypingstopped", data);
 
+      io.to(data["session_id"]).emit("admintypingstopped", data);
     });
 
     socket.on("usertyping", function (data) {
@@ -445,8 +563,6 @@ function startConnect() {
     });
 
     socket.on("usertypingstopped", function (data) {
-
-
       log.info("user typing stopped :: " + JSON.stringify(data))
 
 
@@ -468,16 +584,28 @@ function startConnect() {
 
     socket.on("setsession", async function (data) {
       session_id = decrypt(data["session_id"]);
-
       log.info('In set session:: ' + JSON.stringify(data))
-
-
       if (data["channel"] == "whatsapp") {
+
         data["cb_session"] = data["session_id"];
         data["session_id"] = session_id;
 
         console.log("set session ", data);
-      } else {
+
+
+
+      }
+
+      // else if (
+      //   data["channel"] == "instagram" ||
+      //   data["channel"] == "messenger"
+      // ) {
+      //   data["cb_session"] = data["session_id"];
+      //   data["session_id"] = session_id;
+      // }
+
+      else {
+
         data["ip_address"] = decrypt(data["ip_address"]);
         data["user_location"] = decrypt(data["user_location"]);
         fs.appendFile(
@@ -488,9 +616,15 @@ function startConnect() {
           () => { }
         );
         console.log("set session ", data);
+
+
+
+
         await socket.join(data['session_id']);
 
       }
+
+
       let is_agent_available = true;
       let assigned_agent_email = null;
       let assigned_agent_number = null;
@@ -508,11 +642,11 @@ function startConnect() {
         department_id
       );
       log.info(
-        "get_available_agents:: 451" + JSON.stringify(get_available_agents)
+        "get_available_agents:: " + JSON.stringify(get_available_agents)
       );
       console.log(
-        "assigned agents length===========",
-        get_available_agents.length
+        "assigned agents data===========",
+        JSON.stringify(get_available_agents)
       );
       if (get_available_agents[0].length > 0) {
         if ((!get_available_agents[0][0]["chats_limit"]) ||
@@ -523,12 +657,65 @@ function startConnect() {
           assigned_agent_number = get_available_agents[0][0]["phone_number"];
           assigned_agent_name = get_available_agents[0][0]["full_name"];
           data["agent_name"] = assigned_agent_name
+
+          console.log(data)
+
           log.info('In set session :: assigning agent to : ' + data['session_id'] + 'available rooms : ' + JSON.stringify(io.sockets.adapter.rooms))
+
+          let room1 = io.sockets.adapter.rooms
+
+          let rooms = Object.keys(room1)
+          let flag = false
+
+          rooms.forEach((room) => {
+
+            if (room == assigned_agent) {
+
+              flag = true
+
+            }
+
+          })
+          // if (!flag) {
+
+          //   // await socket.join(data['agent_id']); agent toom not present 
+
+          //   let user_sessions = await redis_client.readCache("" + assigned_agent, "set_session")
+          //   console.log("============In redis")
+          //   console.log(JSON.parse(user_sessions))
+          //   user_sessions = JSON.parse(user_sessions);
+          //   if (user_sessions) {
+          //     console.log("======?", Array.isArray(user_sessions))
+          //     if (typeof user_sessions == 'number') { user_sessions = [] }
+          //     user_sessions.push(data)
+
+          //     console.log("======?", user_sessions)
+
+          //     await redis_client.setAsync(assigned_agent, "set_session", JSON.stringify(user_sessions))
+          //   } else {
+          //     let user_sessions = []
+          //     console.log("============In redis")
+
+          //     user_sessions[0] = data
+          //     console.log(user_sessions)
+          //     if (data['channel'] == 'whatsapp') {
+          //       data['session_id'] = decrypt(data['session_id'])
+          //     }
+          //     await redis_client.setAsync(assigned_agent, "set_session", JSON.stringify(user_sessions))
+
+          //   }
+
+          // }
+
 
           log.info('In setsession sending set session event to assigned agent : ' + assigned_agent, ' for user session : ' + data['session_id'])
 
+
+
           io.to(assigned_agent).emit("setsession", data);
-          console.log("agentassigned data ", {
+
+
+          console.log("agentassigned data", {
             agent_id: assigned_agent,
             channel: data["channel"],
             session_id: data["session_id"],
@@ -554,6 +741,7 @@ function startConnect() {
             );
           });
 
+
           log.info("sending agent assigned event  to user :: " + JSON.stringify({
             agent_id: assigned_agent,
             channel: data["channel"],
@@ -567,6 +755,7 @@ function startConnect() {
             session_id: data["session_id"],
             agent_name: assigned_agent_name,
           });
+
 
           Promise.resolve(
             m_storechat.updateAgentChats(assigned_agent, data["bot_id"], "add")
@@ -617,12 +806,12 @@ function startConnect() {
               });
             }
           );
+
+
         } else {
           is_agent_available = false;
           console.log("this is else in no agent available", data);
-
           log.info('In set session :: No agent availabele for session : ' + data['session_id'] + " user data :" + JSON.stringify(data))
-
           no_agent_data = {
             channel: data["channel"],
             session_id: data["session_id"],
@@ -630,6 +819,13 @@ function startConnect() {
           };
           if (data["channel"] == "whatsapp")
             no_agent_data["user_number"] = data["user_number"];
+
+          // if (data["channel"] == "instagram") {
+
+
+          //   await instagram_send_message(data["device_print"],"No agents are busy please try again after some time");
+
+          // }  
           io.to(data["session_id"]).emit("noagentavailable", no_agent_data);
         }
       } else {
@@ -643,10 +839,15 @@ function startConnect() {
         if (data["channel"] == "whatsapp")
           no_agent_data["user_number"] = data["user_number"];
         io.to(data["session_id"]).emit("noagentavailable", no_agent_data);
+
+
+        // if (data["channel"] == "instagram") {
+
+
+        //   await instagram_send_message(data["device_print"],"No agents are online please try again after some time");
+
+        // }
       }
-
-
-
       if (data["channel"] == "website") {
         Promise.resolve(m_storechat.checkSession(session_id)).then(function (
           result
@@ -668,6 +869,15 @@ function startConnect() {
           }
         });
       }
+
+
+      // if (data["channel"] == "instagram") {
+
+
+      //   await instagram_send_message(data["device_print"], data["agent_name"]+" "+data["message"] );
+
+      // }
+
       if (data["channel"] == "whatsapp") {
         Promise.resolve(m_storechat.checkSession(session_id)).then(function (
           result
@@ -710,30 +920,36 @@ function startConnect() {
 
         console.log("in is available");
 
-        // data["agent_name"] = data["full_name"];
-        // data["message"] = "Joined the chat";
-        // console.log(data);
-        // if(data['channel']=="whatsapp"){
+
+        setTimeout(async () => {
+          // data["agent_name"] = data["full_name"];
+          data["message"] = "(---Agent Joined the chat session---)";
+          console.log(data);
+          if (data['channel'] == "whatsapp") {
 
 
 
-        //   Promise.resolve(m_storechat.getWhatsappDetails(data['bot_id'])).then(
-        //     function (result) {
+            Promise.resolve(m_storechat.getWhatsappDetails(data['bot_id'])).then(
+              function (result) {
 
-        //       if (result["provider"] == "cm.com") {
-        //         send_message = send_cmmessage(result, data);
-        //       } else if (result["provider"] == "wati") {
-        //         send_message = send_watimessage(result, data);
-        //       } else if (result["provider"] == "360dialog") {
-        //         send_message = send_360message(result, data);
-        //       } else if (result["provider"] == "netcore") {
-        //         send_message = send_netcoremessage(result, data);
-        //       }
-        //     }
-        //   );
+                if (result["provider"] == "cm.com") {
+                  send_message = send_cmmessage(result, data);
+                } else if (result["provider"] == "wati") {
+                  send_message = send_watimessage(result, data);
+                } else if (result["provider"] == "360dialog") {
+                  send_message = send_360message(result, data);
+                } else if (result["provider"] == "netcore") {
+                  send_message = send_netcoremessage(result, data);
+                }
+              }
+            );
 
 
-        // }
+          }
+
+        }, 3000);
+
+
 
         Promise.resolve(m_storechat.isWhatsappEnabled(data["bot_id"])).then(
           function (res) {
@@ -742,7 +958,7 @@ function startConnect() {
               // Promise.resolve(m_storechat.getAgentsList(data["bot_id"])).then(function(resp){
               // console.log('agents list -----> ',resp);
               // var agents_list = resp[0];
-              Promise.resolve(m_storechat.getWhatsappDetails("5354")).then(
+              Promise.resolve(m_storechat.getWhatsappDetails(data["bot_id"])).then(
                 function (result) {
                   // for(i=0;i<agents_list.length;i++){
                   sendWhatsappNotification(
@@ -794,70 +1010,55 @@ function startConnect() {
             }
           }
         );
-      } else {
-
-        if (data['channel'] == "whatsapp") {
-          data["message"] = "No agents are available at the moment.";
 
 
-          Promise.resolve(m_storechat.getWhatsappDetails(data['bot_id'])).then(
-            function (result) {
 
-              if (result["provider"] == "cm.com") {
-                send_message = send_cmmessage(result, data);
-              } else if (result["provider"] == "wati") {
-                send_message = send_watimessage(result, data);
-              } else if (result["provider"] == "360dialog") {
-                send_message = send_360message(result, data);
-              } else if (result["provider"] == "netcore") {
-                send_message = send_netcoremessage(result, data);
-              }
-            }
-          );
+        if (data['channel'] == 'website') {
 
+          let e = await redis_client.setAsync(decrypt(data['session_id']), "session_id", data['session_id'], "channel", "website")
+
+
+          redis_client.redis_client.expire(data['session_id'], 9000);
 
         }
+        else if (data['channel'] == 'whatsapp') {
+
+          let e = await redis_client.setAsync(data['session_id'], "channel", "whatsapp", "device_print", data['device_print'])
+
+          console.log("============>" + e)
+          redis_client.redis_client.expire(data['session_id'], 9000);
+
+        }
+      } else {
+
+        setTimeout(async () => {
+
+          if (data['channel'] == "whatsapp") {
+            data["message"] = "No agents are available at the moment.";
+
+
+            Promise.resolve(m_storechat.getWhatsappDetails(data['bot_id'])).then(
+              function (result) {
+
+                if (result["provider"] == "cm.com") {
+                  send_message = send_cmmessage(result, data);
+                } else if (result["provider"] == "wati") {
+                  send_message = send_watimessage(result, data);
+                } else if (result["provider"] == "360dialog") {
+                  send_message = send_360message(result, data);
+                } else if (result["provider"] == "netcore") {
+                  send_message = send_netcoremessage(result, data);
+                }
+              }
+            );
+
+
+          }
+
+        }, 3000);
+
       }
-      // if (data['bot_id'] == '203') {
-      //   const body = {
-      //     messages: {
-      //       authentication: {
-      //         productToken: '545295AE-59E3-467A-8119-FFA961B1F853'
-      //       },
-      //       msg: [{
-      //         body: {
-      //           type: 'auto',
-      //           content: 'Fallback text for SMS'
-      //         },
-      //         to: [
-      //           {
-      //             number: '00917897336949'
-      //           },
-      //           {
-      //             number: '00918897670321'
-      //           },
-      //           {
-      //             number: '00918500660020'
-      //           }
-      //         ],
-      //         from: '0031762011571',
-      //         allowedChannels: ["WhatsApp"],
-      //         richContent: {
-      //           conversation: [{
-      //             text: "You have got a customer waiting for you with live interaction please respond to him *ASAP*"
-      //           }]
-      //         }
-      //       }]
-      //     }
-      //   }
-      //   axios.post('https://gw.cmtelecom.com/v1.0/message', body)
-      //     .then((res) => {
-      //       console.log(`Status: ${res.status}`);
-      //       console.log('Body: ', res.data);
-      //     }).catch((err) => {
-      //       console.error(err);
-      //     });
-      // }
+
     });
 
     socket.on("setagentname", function (data) {
@@ -888,6 +1089,7 @@ function startConnect() {
       io.sockets.emit("disconn", data);
     });
 
+
     socket.on("assignotheragent", function (data) {
       console.log("assigning to other agent", data);
       if (data["session_id"].length > 10) {
@@ -917,186 +1119,312 @@ function startConnect() {
       ).then(function (result) { });
     });
 
-    socket.on("closesession", function (data) {
+
+
+
+
+
+    socket.on("closesession", async function (data) {
 
       log.info('In close session ', JSON.stringify(data))
 
-      session_id = decrypt(data["session_id"]);
-      if (data["channel"] == "whatsapp") {
-        data["session_id"] = session_id;
-        Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
-          result
-        ) {
-
-          console.log("close session result ----->", result);
-          agent_ids = result[0]["agent_ids"]
-            ? result[0]["agent_ids"].toString().split(",")
-            : [];
-          agent_ids.forEach((agent_id) => {
-            io.to(agent_id).emit("closesession", data);
-          });
-          Promise.resolve(m_storechat.checkIsClosed(session_id)).then(function (
-            res
-          ) {
-            if (res[0].length > 0) {
-            } else {
-              agent_ids.forEach((agent_id) => {
-                Promise.resolve(
-                  m_storechat.updateAgentChats(
-                    agent_id,
-                    data["bot_id"],
-                    "delete"
-                  )
-                ).then(function (result) { });
-              });
-            }
-          });
-        });
-      } else {
-        Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
-          result
-        ) {
-          log.info("In close session for whatsapp : getting assignd agent from database for session : " + data['session_id'] + " : " + JSON.stringify(result))
-
-          console.log("close session result ----->", result);
-          if (result && result.length > 0) {
-            agent_ids = result[0]["agent_ids"].toString().split(",");
-
-            log.info("In close session for whatsapp : emiting closesession event to agent : " + agent_ids + " : for user : " + JSON.stringify(data))
-
-            agent_ids.forEach((agent_id) => {
-
-              io.to(agent_id).emit("closesession", data);
-            });
-            Promise.resolve(m_storechat.checkIsClosed(session_id)).then(
-              function (res) {
-                if (res[0].length > 0) {
-
-
-                  log.info("In close session for whatsapp : checking the session is closed : " + session_id + " : result : " + JSON.stringify(res) + " : for user : " + JSON.stringify(data))
-
-
-                } else {
-                  agent_ids.forEach((agent_id) => {
-                    Promise.resolve(
-                      m_storechat.updateAgentChats(
-                        agent_id,
-                        data["bot_id"],
-                        "delete"
-                      )
-                    ).then(function (result) {
-
-
-                      log.info("In close session for whatsapp : updating agent chats for : " + agent_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
-
-
-
-
-                    });
-                  });
-                }
-              }
-            );
-          }
-        });
-      }
+      // session_id = decrypt(data["session_id"]);
       console.log("close session called ", data);
+
+
       let time = timeStamp()
-      Promise.resolve(m_storechat.closeSession(session_id, time)).then(function (
-        result
-      ) {
 
-        log.info("In close session for whatsapp : closing session : " + session_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
 
-      });
+
+      if (data["channel"] == "whatsapp" || data["channel"] == "instagram" ||
+        data["channel"] == "messenger") {
+        session_id = decrypt(data['session_id']);
+        data['session_id'] = session_id
+
+        if (data["agent_id"] == null || data["agent_id"] == undefined || data["agent_id"].length == 2) {
+          let agent_ids = await m_storechat.getAgentId(session_id)
+          if (!Array.isArray(agent_ids)) {
+            log.error('Error fetching data from database :: ' + agent_ids)
+            return
+          }
+
+          data['agent_id'] = agent_ids[0].agent_ids
+          console.log(data)
+        }
+        io.to(data['agent_id'].toString()).emit("closesession", data);
+
+        let update_assigned_chats = await m_storechat.updateAgentChats(data['agent_id'], data['bot_id'], "delete")
+
+        log.info("Updating assigned chats status for agentid :: " + data['agent_id'] + " : for session :: " + session_id + " : result :: " + update_assigned_chats)
+
+      }
+      else {
+        session_id = decrypt(data["session_id"]);
+        if (data["agent_id"] == null || data["agent_id"] == undefined || data["agent_id"].length == 2) {
+          let agent_ids = await m_storechat.getAgentId(session_id)
+          if (!Array.isArray(agent_ids)) {
+            log.error('Error fetching data from database :: ' + agent_ids)
+            return
+          }
+
+          data['agent_id'] = agent_ids[0].agent_ids
+          console.log(agent_ids)
+        }
+
+        io.to(data['agent_id'].toString()).emit("closesession", data);
+
+
+        let update_assigned_chats = await m_storechat.updateAgentChats(data.agent_id, data['bot_id'], "delete")
+
+        log.info("Updating assigned chats status for agentid :: " + data.agent_id + " : for session :: " + session_id + " : result :: " + update_assigned_chats)
+
+
+      }
+
+      let result = await m_storechat.closeSession(session_id, time)
+      log.info("In close session for whatsapp : closing session : " + session_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
+      await redis_client.del(session_id)
+
     });
 
-    socket.on("closesessionfromadmin", function (data) {
-      // session_id = decrypt(data["session_id"]);
+
+
+    socket.on("closesessionfromadmin", async function (data) {
+
 
       log.info('In close from admin  :: ', JSON.stringify(data))
 
+      let room1 = io.sockets.adapter.rooms;
+      let session_id
+      log.info("In close session from admin : closeing session - " + data["agent_id"] + " : all connected rooms : " + JSON.stringify(room1))
 
-      if (data["session_id"].length > 10 && data.channel != "website") {
-        session_id = decrypt(data["session_id"]);
-      } else if (data["session_id"].length < 10 || data.channel == "website") {
-        session_id = data["session_id"];
-      } else {
-        session_id = decrypt(data["session_id"]);
+      room1 = io.sockets.adapter.rooms;
+      let rooms = Object.keys(room1)
+      console.log(rooms);
+      let flag = false
+
+      rooms.forEach((room) => {
+
+        if (room == data['agent_id']) {
+
+          flag = true
+
+        }
+
+      })
+      if (!flag) {
+
+        await socket.join(data['agent_id']);
+
       }
-      console.log("close session from admin called ", data);
-      io.to(session_id).emit("closesessionfromadmin", data);
-      io.to(data.agent_id).emit("closesessionfromadmin", data);
 
-      // Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
-      //   result
-      // ) {
-      //   console.log("close session result ----->", result);
-      //   agent_ids = result[0]["agent_ids"]
-      //     ? result[0]["agent_ids"].toString().split(",")
-      //     : [];
-      //   console.log("agent ids in close session admin ", agent_ids);
-      //   agent_ids.forEach((agent_id) => {
-      //  io.to(data.agent_id).emit("closesessionfromadmin", data);
-      //   });
-      //   agent_ids.forEach((agent_id) => {
-      // Promise.resolve(
-      //   m_storechat.updateAgentChats(data.agent_id, data["bot_id"], "delete")
-      // ).then(function (result) {});
-      // });
-      // Promise.resolve(m_storechat.closeSession(session_id)).then(function (
-      //   result
-      // ) {});
-      // });
-      if (data.channel == "website") {
-        session_id = decrypt(data["session_id"]);
-      }
-      if (data["channel"] == "whatsapp") {
 
-        Promise.resolve(m_storechat.getWhatsappDetails(data["bot_id"])).then(
-          function (result) {
-            console.log("inside channel whatsapp", result["provider"]);
+      if (data['channel'] == 'whatsapp') {
 
-            data["message"] = "Agent closed your session";
-            if (result["provider"] == "cm.com") {
-              send_message = send_cmmessage(result, data);
-            } else if (result["provider"] == "wati") {
-              send_message = send_watimessage(result, data);
-            } else if (result["provider"] == "360dialog") {
-              send_message = send_360message(result, data);
-            } else if (result["provider"] == "netcore") {
-              send_message = send_netcoremessage(result, data);
-            }
+        session_id = data['session_id']
+
+        if (data["agent_id"] == null || data["agent_id"] == undefined || data["agent_id"].length == 2) {
+          let agent_ids = await m_storechat.getAgentId(session_id)
+          if (!Array.isArray(agent_ids)) {
+            log.error('Error fetching data from database :: ' + agent_ids)
+            return
           }
+
+          data['agent_id'] = agent_ids[0].agent_ids
+          console.log(agent_ids)
+        }
+        io.to(data['agent_id'].toString()).emit("closesessionfromadmin", data);
+        let chatbotWhatsappDetails = await m_storechat.getWhatsappDetails(data["bot_id"])
+
+        // if (!Array.isArray(chatbotWhatsappDetails)) {
+        //   log.error("Error fetching chatbot details from database :: " + JSON.stringify(chatbotWhatsappDetails))
+        //   return
+        // }
+
+        log.info("Whatsapp bot details :: " + JSON.stringify(chatbotWhatsappDetails))
+
+
+        console.log("inside channel whatsapp", chatbotWhatsappDetails["provider"]);
+
+
+        data["message"] = "(---Agent closed your session---)";
+
+
+        if (chatbotWhatsappDetails["provider"] == "cm.com") {
+          send_message = send_cmmessage(chatbotWhatsappDetails, data);
+        } else if (chatbotWhatsappDetails["provider"] == "wati") {
+          send_message = send_watimessage(chatbotWhatsappDetails, data);
+        } else if (chatbotWhatsappDetails["provider"] == "360dialog") {
+          send_message = send_360message(chatbotWhatsappDetails, data);
+        } else if (chatbotWhatsappDetails["provider"] == "netcore") {
+          send_message = send_netcoremessage(chatbotWhatsappDetails, data);
+        }
+        let time = timeStamp()
+        let result = await m_storechat.closeSession(session_id, time)
+
+        log.info("In close session from admin whatsapp : closing session : " + session_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
+
+
+        let update_assigned_chats = await m_storechat.updateAgentChats(data['agent_id'], data['bot_id'], "delete")
+
+        log.info("Updating assigned chats status for agentid :: " + data['agent_id'] + " : for session :: " + session_id + " : result :: " + update_assigned_chats)
+
+      }
+      else if (data["channel"] == "instagram") {
+        await instagram_send_message(data["device_print"], "Agent left the chat");
+
+        // await reply(data['device_print'],data['message'],)
+      }
+      // else if (data["channel"] == "messenger") {
+      //   await messenger_send_message(data["device_print"], "Agent left the chat");
+
+      //   // await reply(data['device_print'],data['message'],)
+      // }
+      else {
+
+        session_id = decrypt(data['session_id'])
+
+        let agent_ids = await m_storechat.getAgentId(data['session_id'])
+
+
+        if (!Array.isArray(agent_ids)) {
+          log.error("Error fetching agent  from database in close session from admin :: " + JSON.stringify(agent_ids))
+          return
+        }
+
+        agent_ids = agent_ids[0]
+        io.to(data['session_id']).emit("closesessionfromadmin", data);
+
+        console.log(agent_ids)
+
+        io.to(data['agent_id'].toString()).emit("closesessionfromadmin", data);
+
+        let time = timeStamp()
+        let result = m_storechat.closeSession(session_id, time)
+
+        log.info("In close session from admin : closing session : " + session_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
+
+
+        let update_assigned_chats = await m_storechat.updateAgentChats(data['agent_id'], data['bot_id'], "delete")
+
+        log.info("Updating assigned chats status for agentid :: " + data['agent_id'] + " : for session :: " + session_id + " : result :: " + update_assigned_chats)
+
+
+      }
+
+      await redis_client.del(session_id)
+    });
+
+
+
+
+
+    socket.on("requestfeedback", async function (data) {
+      log.info("In requestfeedback :: " + JSON.stringify(data))
+
+      if (data['channel'] == 'whatsapp') {
+
+        let whatsapp_details = await m_storechat.getWhatsappDetails(data['bot_id'])
+        console.log(whatsapp_details)
+        let options = {
+          'method': 'POST',
+          'url': 'https://waba.360dialog.io/v1/messages',
+          'headers': {
+            'D360-API-KEY': '' + whatsapp_details.product_token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            "recipient_type": "individual",
+            "to": "" + data.device_print,
+            "type": "interactive",
+            "interactive": {
+              "type": "list",
+              "body": {
+                "text": "Please rate this conversation"
+              },
+              "action": {
+                "button": "view",
+                "sections": [
+                  {
+                    "rows": [
+                      {
+                        "id": "livechat_Great_5",
+                        "title": "⭐⭐⭐⭐⭐"
+                      },
+                      {
+                        "id": "livechat_Good_4",
+                        "title": "⭐⭐⭐⭐"
+                      },
+                      {
+                        "id": "livechat_Okay_3",
+                        "title": "⭐⭐⭐"
+                      },
+                      {
+                        "id": "livechat_Bad_2",
+                        "title": "⭐⭐"
+                      },
+                      {
+                        "id": "livechat_Terrible_1",
+                        "title": "⭐"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          })
+
+        };
+        let resp = await doRequest(options)
+        console.log(resp)
+
+
+      }
+      if (data["channel"] == "instagram") {
+        let question_text = "How would you rate our company?";
+        options = ["Terrible", "Bad", "Okay", "Good", "Great"];
+
+        await instagram_send_message(
+          data["device_print"],
+          question_text,
+          options
+        );
+      } else if (data["channel"] == "messenger") {
+        let question_text = "How would you rate our company?";
+        options = ["Terrible", "Bad", "Okay", "Good", "Great"];
+
+        await messenger_send_message(
+          data["device_print"],
+          question_text,
+          options
         );
       }
 
-      Promise.resolve(
-        m_storechat.updateAgentChats(data.agent_id, data["bot_id"], "delete")
-      ).then(function (result) {
-
-        log.info("In close session form admin : updating agent chats for : " + data.agent_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
-
-
-      });
-      let time = timeStamp()
-      Promise.resolve(m_storechat.closeSession(session_id, time)).then(function (
-        result
-      ) {
-        log.info("In close session from admin : closing session : " + session_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
-
-      });
-    });
-
-    socket.on("requestfeedback", function (data) {
       io.to(data["session_id"]).emit("requestfeedback", data);
+
+
     });
 
     socket.on("submitfeedbackmessage", function (data) {
       console.log("submitting feedback");
+      log.info("In submitfeedbackmessage :: " + JSON.stringify(data))
+
       session_id = decrypt(data["session_id"]);
       if (data["channel"] == "whatsapp") {
-        data["session_id"] = session_id;
+
+        Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
+          result
+        ) {
+          agent_ids = result[0]["agent_ids"].toString().split(",");
+          data["session_id"] = session_id;
+
+          console.log(agent_ids[0], session_id);
+          data["agent_id"] = agent_ids[0];
+          console.log(data);
+          io.to(data["agent_id"]).emit("submitfeedback", data);
+          return;
+        });
+
       }
       io.to(data["agent_id"]).emit("submitfeedbackmessage", data);
       Promise.resolve(
@@ -1106,9 +1434,7 @@ function startConnect() {
 
     socket.on("userseenmessage", function (data) {
       console.log("user seen event");
-
       log.info("In user seen message :: " + JSON.stringify(data))
-
 
       session_id = decrypt(data["session_id"]);
       if (data["channel"] == "whatsapp") {
@@ -1121,9 +1447,7 @@ function startConnect() {
     });
 
     socket.on("agentseenmessage", function (data) {
-
       log.info("In agent seen message :: " + JSON.stringify(data))
-
       console.log("user seen event");
       if (data["session_id"].length > 10) {
         session_id = decrypt(data["session_id"]);
@@ -1140,11 +1464,18 @@ function startConnect() {
       ) { });
     });
 
-    socket.on("markresolved", function (data) {
+
+
+
+
+
+    socket.on("markresolved", async function (data) {
+      console.log("marking resolved");
 
       log.info('In marked resolved  :: ' + JSON.stringify(data))
 
-      console.log("marking resolved");
+
+
       if (data["session_id"].length > 10) {
         session_id = decrypt(data["session_id"]);
       } else if (data["session_id"].length < 10) {
@@ -1152,10 +1483,13 @@ function startConnect() {
       } else {
         session_id = decrypt(data["session_id"]);
       }
+
       io.to(data["session_id"]).emit("markresolved", data);
-      Promise.resolve(m_storechat.markResolved(session_id)).then(function (
+
+      Promise.resolve(m_storechat.markResolved(session_id)).then(async function (
         result
       ) {
+        await redis_client.del(session_id)
 
         log.info('In marked resolved  :: ' + 'saving the session : ' + data['session-id'] + 'as resolved : user data : ' + JSON.stringify(data))
 
@@ -1170,7 +1504,10 @@ function startConnect() {
           : [];
         console.log("mark resolved agents ", agent_ids);
         agent_ids.forEach((agent_id) => {
+
           io.to(agent_id).emit("markresolved", data);
+
+
         });
         agent_ids.forEach((agent_id) => {
           Promise.resolve(
@@ -1184,17 +1521,26 @@ function startConnect() {
         Promise.resolve(m_storechat.closeSession(session_id, time)).then(function (
           result
         ) {
-          log.info("In mark as resolved : updating agent chats for : " + agent_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
+
+          // log.info("In mark as resolved : updating agent chats for : " + agent_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
 
         });
       });
+
+      if (data["channel"] == "instagram") {
+        await instagram_send_message(
+          data["device_print"],
+          "Agent closed the chat"
+        );
+      }
+
       if (data["channel"] == "whatsapp") {
         console.log(data)
         Promise.resolve(m_storechat.getWhatsappDetails(data["bot_id"])).then(
           function (result) {
             console.log("inside channel whatsapp", result);
 
-            data["message"] = "Agent closed your session";
+            data["message"] = "(---Agent resolved your session---)";
             if (result["provider"] == "cm.com") {
               send_message = send_cmmessage(result, data);
             } else if (result["provider"] == "wati") {
@@ -1207,12 +1553,45 @@ function startConnect() {
           }
         );
       }
+
+
     });
 
     socket.on("submitfeedback", function (data) {
       console.log("submitfeedback data", data);
       log.info('In submitfeedback :: ' + JSON.stringify(data))
+      if (data["channel"] == "whatsapp") {
+        let session_id = decrypt(data["session_id"]);
 
+        Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
+          result
+        ) {
+          agent_ids = result[0]["agent_ids"].toString().split(",");
+          data["session_id"] = session_id;
+
+          console.log(agent_ids[0], session_id);
+          data["agent_id"] = agent_ids[0];
+          console.log(data);
+          io.to(data["agent_id"]).emit("submitfeedback", data);
+          return;
+        });
+      }
+      if (data["channel"] == "instagram" || data["channel"] == "messenger") {
+        let session_id = decrypt(data["session_id"]);
+
+        Promise.resolve(m_storechat.getAgentId(session_id)).then(function (
+          result
+        ) {
+          agent_ids = result[0]["agent_ids"].toString().split(",");
+          data["session_id"] = session_id;
+
+          console.log(agent_ids[0], session_id);
+          data["agent_id"] = agent_ids[0];
+          console.log(data);
+          io.to(data["agent_id"]).emit("submitfeedback", data);
+          return;
+        });
+      }
       if (data["session_id"].length > 10) {
         session_id = decrypt(data["session_id"]);
       } else if (data["session_id"].length < 10) {
@@ -1270,7 +1649,12 @@ function startConnect() {
       io.sockets.emit("make-answer", data);
     });
 
+
   });
+
+
+
+
 }
 
 
@@ -1292,9 +1676,36 @@ function startConnect() {
 
 
 
+app.get("/", function (req, res) {
+  res.sendFile(__dirname + "/index.html");
+});
 
 
+app.get("/getToken", function (req, res) {
+  var token = new AccessToken(twilioAccountSid, twilioApiKey, twilioApiSecret);
+  log.info("get_available_agents:: 451" + JSON.stringify(token));
+  token.identity = req.query.identity;
+  const videoGrant = new VideoGrant({
+    room: req.query.room,
+  });
+  token.addGrant(videoGrant);
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.json({ token_twilio: token.toJwt() });
+});
 
+app.get("/status", (req, res) => {
+  res.sendStatus(200);
+});
+
+app.post("/simvolyWebhook", async (req, res) => {
+  try {
+    console.log("Post webhook call");
+    console.log(req.query);
+    res.sendStatus(200);
+  } catch (err) {
+    console.log(err, "errrrrr");
+  }
+});
 
 
 
@@ -1614,6 +2025,53 @@ function sendGridEmailSendingOld(agents_list, bot_name) {
   });
 }
 
+async function instagram_send_message(sender_id, message, options) {
+  Promise.resolve(m_storechat.getInstagramAccessToken(sender_id)).then(
+    async function (result) {
+      instagram_access_token = result[0].page_access_token;
+
+      console.log(sender_id, message, instagram_access_token);
+      if (options) {
+        await instagram_utils.reactions(
+          sender_id,
+          message,
+          options,
+          instagram_access_token,
+          true
+        );
+        return;
+      }
+      await instagram_utils.reply(sender_id, message, instagram_access_token);
+    }
+  );
+  return;
+}
+
+async function messenger_send_message(sender_id, message, options) {
+  Promise.resolve(m_storechat.getMessengerAccessToken(sender_id)).then(
+    async function (result) {
+      messenger_access_token = result[0].page_access_token;
+
+      if (options) {
+        console.log(sender_id, message, messenger_access_token);
+
+        await messenger_utils.reactions(
+          sender_id,
+          message,
+          options,
+          messenger_access_token,
+          true
+        );
+        return;
+      }
+      await messenger_utils.reply(sender_id, message, messenger_access_token);
+    }
+  );
+  return;
+}
+
+
+
 io.on("close", function (socket) {
   setInterval(function () {
     if (!if_connected) {
@@ -1625,5 +2083,5 @@ io.on("close", function (socket) {
 startConnect();
 
 http.listen(8000, function () {
-  console.log("listening on *:8000");
+  console.log("listening on *:8007");
 });

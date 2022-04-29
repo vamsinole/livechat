@@ -1,5 +1,6 @@
 var knex = require("./connector");
 const fs = require("fs");
+const timeStamp = require('../utils/timeStamp.js')
 
 module.exports = {
   storeChat: function (session_id, customer_id, text, type, agent_name = "") {
@@ -306,13 +307,13 @@ module.exports = {
       });
     });
   },
-  closeSession: function (session_id,time) {
-    console.log(session_id,time)
+  closeSession: function (session_id, time) {
+    console.log(session_id, time)
     let query = `UPDATE live_chat_sessions SET is_closed='1',chat_closed_at='${time}' WHERE session_id=${session_id};`;
     console.log(query)
     return new Promise(function (resolve, reject) {
       knex.raw(query).then(function (result) {
-      
+
         resolve(result);
       });
     });
