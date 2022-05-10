@@ -251,8 +251,8 @@ function startConnect() {
       let room1 = io.sockets.adapter.rooms;
       let session_id
 
-      // log.info("admin sent message :: " + JSON.stringify(data))
-      // log.info("admin sent message : sending to - " + data["agent_id"] + " : all connected rooms : " + JSON.stringify(room1))
+      log.info("admin sent message :: " + JSON.stringify(data))
+      log.info("admin sent message : sending to - " + data["agent_id"] + " : all connected rooms : " + JSON.stringify(room1))
 
 
       // console.log(data)
@@ -1709,36 +1709,29 @@ app.post("/simvolyWebhook", async (req, res) => {
 
 
 
-function sendWhatsappNotification(number, data, bot_name) {
-  var access_token = data["product_token"];
-  const headers = {
-    headers: {
-      "Content-Type": "application/json",
+async function sendWhatsappNotification(number, data, bot_name) {
+
+  number = ""+number.split('-').join('').split('+').join('')
+
+  let options = {
+    method: "POST",
+    url: "https://www.smatbot.com:8006/sendSingleTemplateMessage",
+    body: {
+      message: "Testing template",
+      template_name: "livechat",
+      chatbot_id: "5354",
+      number:  number,
+      header_params: [],
+      body_params: [bot_name],
+      button_params: [],
+      language: "en",
     },
-  };
-  const body = {
-    message: "Testing template",
-    template_name: "live_chat",
-    chatbot_id: "5354",
-    contact: number,
-    header_params: [],
-    body_params: ["SmatBot Whatsapp"],
-    button_params: [],
-    language: "en_US",
-  };
-  axios
-    .post(
-      "https://www.smatbot.com/kya_backend/api/sendTemplateMessage",
-      body,
-      headers
-    )
-    .then((res) => {
-      console.log(`Notification Status: ${res.status}`);
-      console.log("Notification Body: ", res.data);
-    })
-    .catch((err) => {
-      console.error(err);
-    });
+    json:true
+  }
+  console.log(options)
+  let resp = await doRequest(options)
+  console.log(resp)
+  log.info("Send template notification request :: " + JSON.stringify(options) + " :: response " + JSON.stringify(resp))
 }
 
 function send_360message(result, data) {
