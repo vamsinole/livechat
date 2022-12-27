@@ -15,7 +15,6 @@ var http = require("https").createServer(
   },
   app
 );
-var dir_name = "/home/ubuntu/live_chat_dev/";
 const AccessToken = require("twilio").jwt.AccessToken;
 const VideoGrant = AccessToken.VideoGrant;
 //const nodemailer = require("nodemailer");
@@ -95,7 +94,7 @@ function startConnect() {
 
           console.log(queryObj.agentId)
 
-          let user_sessions = await redis_client.getAsync(queryObj.agentId)
+          let user_sessions = await redis_client.getAsync(queryObj.agentId) //2378 of agent id dashboard agents table id
           console.log(user_sessions)
 
 
@@ -357,7 +356,7 @@ function startConnect() {
 
       let date = new Date()
 
-      await redis_client.setAsync(session_id, "last_update", "" + date.getTime())
+      await redis_client.setAsync(session_id, "last_update", "" + date.getTime())//get the insert 
 
 
 
@@ -676,36 +675,6 @@ function startConnect() {
             }
 
           })
-          // if (!flag) {
-
-          //   // await socket.join(data['agent_id']); agent toom not present 
-
-          //   let user_sessions = await redis_client.readCache("" + assigned_agent, "set_session")
-          //   console.log("============In redis")
-          //   console.log(JSON.parse(user_sessions))
-          //   user_sessions = JSON.parse(user_sessions);
-          //   if (user_sessions) {
-          //     console.log("======?", Array.isArray(user_sessions))
-          //     if (typeof user_sessions == 'number') { user_sessions = [] }
-          //     user_sessions.push(data)
-
-          //     console.log("======?", user_sessions)
-
-          //     await redis_client.setAsync(assigned_agent, "set_session", JSON.stringify(user_sessions))
-          //   } else {
-          //     let user_sessions = []
-          //     console.log("============In redis")
-
-          //     user_sessions[0] = data
-          //     console.log(user_sessions)
-          //     if (data['channel'] == 'whatsapp') {
-          //       data['session_id'] = decrypt(data['session_id'])
-          //     }
-          //     await redis_client.setAsync(assigned_agent, "set_session", JSON.stringify(user_sessions))
-
-          //   }
-
-          // }
 
 
           log.info('In setsession sending set session event to assigned agent : ' + assigned_agent, ' for user session : ' + data['session_id'])
