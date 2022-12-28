@@ -1663,7 +1663,7 @@ app.get("/getToken", function (req, res) {
 });
 
 app.get("/status", (req, res) => {
-  res.sendStatus(200).json({ status: true, messgae: "it's working" });
+  res.status(200).json({ status: true, messgae: "it's working" });
 });
 
 app.post("/simvolyWebhook", async (req, res) => {
