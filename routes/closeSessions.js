@@ -30,8 +30,9 @@ router.get('/closeSessions', async (req, res) => {
 
         console.log(openSession)
 
+        console.log("redis readcache==>>  ", "" + openSession.session_id, "last_update");
         let open_session_last_chat = await redis_client.readCache("" + openSession.session_id, "last_update")
-        console.log("==========>in open ses" + open_session_last_chat)
+        console.log("redis==========>in open ses >>> ", open_session_last_chat)
         if (open_session_last_chat) {
 
             let timeDiff = Math.abs(parseInt(open_session_last_chat) - currentTime)
@@ -45,6 +46,7 @@ router.get('/closeSessions', async (req, res) => {
                     if (openSession.agent_ids) {
                         await m_storechat.updateAgentChats(openSession.agent_ids, openSession.chatbot_id, "delete")
                         let data = await redis_client.getAsync("" + openSession.session_id)
+                        console.log("redis read getdata ==>>> ", data);
                         data["agent_id"] = openSession.agent_ids
                         data['chatbot_id'] = openSession.chatbot_id
                         if (data['channel'] == 'whatsapp') {
@@ -54,17 +56,18 @@ router.get('/closeSessions', async (req, res) => {
 
                         }
 
-                        // data['session_id'] = await redis_client.readCache("" + openSession.session_id, "session_id") || openSession.session_id
-                        // data['channel']= await redis_client.readCache("" + openSession.session_id, "channel")
+
                         IO.emit('reloadpage', data)
 
                     }
+                    console.log("redis delete data==>>> ", "" + openSession.session_id);
                     await redis_client.del("" + openSession.session_id)
 
                 }
 
             } else if (timeDiff > 230000 && timeDiff < 300000) {
 
+                console.log("redis get data ==>> ", "" + openSession.session_id);
                 let data = await redis_client.getAsync("" + openSession.session_id)
                 data['chatbot_id'] = openSession.chatbot_id
                 data['agent_id'] = openSession.agent_ids

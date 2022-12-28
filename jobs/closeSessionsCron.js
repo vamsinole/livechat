@@ -12,7 +12,7 @@ const closeSessionCron = cron.schedule("*/1 * * * *", async function () {
     + timesta);
   let options = {
     method: "GET",
-    url: "https://smatbot.com:8000/closeSessions",
+    url: `https://smatbot.com:${PORT}/closeSessions`,
     headers: {
       Connection: "keep-alive",
       "Content-Type": "application/json",
