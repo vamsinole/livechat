@@ -96,7 +96,7 @@ function startConnect() {
           console.log(queryObj.agentId)
 
           let user_sessions = await redis_client.getAsync(queryObj.agentId) //2378 of agent id dashboard agents table id
-          console.log(user_sessions)
+          console.log("user_sessions redis data =>> ", user_sessions);
 
 
           if (user_sessions) {
@@ -115,6 +115,7 @@ function startConnect() {
             }
 
           }
+          console.log("queryObj.agentId redis ==>> ", queryObj.agentId);
           await redis_client.del(queryObj.agentId)
 
         }
@@ -357,6 +358,8 @@ function startConnect() {
 
       let date = new Date()
 
+      console.log("redis ==>>", session_id, "last_update", "" + date.getTime());
+
       await redis_client.setAsync(session_id, "last_update", "" + date.getTime())//get the insert 
 
 
@@ -535,6 +538,7 @@ function startConnect() {
       const d = new Date();
       let time = d.getTime();
 
+      console.log("redis setsession ==>", session_id, "last_update", "" + time);
       redis_client.setAsync(session_id, "last_update", "" + time)
 
 
@@ -985,6 +989,8 @@ function startConnect() {
 
         if (data['channel'] == 'website') {
 
+          console.log("redis setasync ==>", decrypt(data['session_id']), "session_id", data['session_id'], "channel", "website");
+
           let e = await redis_client.setAsync(decrypt(data['session_id']), "session_id", data['session_id'], "channel", "website")
 
 
@@ -993,6 +999,7 @@ function startConnect() {
         }
         else if (data['channel'] == 'whatsapp') {
 
+          console.log("redis setasync ==>", data['session_id'], "channel", "whatsapp", "device_print", data['device_print']);
           let e = await redis_client.setAsync(data['session_id'], "channel", "whatsapp", "device_print", data['device_print'])
 
           console.log("============>" + e)
@@ -1153,6 +1160,7 @@ function startConnect() {
 
       let result = await m_storechat.closeSession(session_id, time)
       log.info("In close session for whatsapp : closing session : " + session_id + " : result : " + JSON.stringify(result) + " : for user : " + JSON.stringify(data))
+      console.log("delete from redis", session_id);
       await redis_client.del(session_id)
 
     });
@@ -1281,6 +1289,7 @@ function startConnect() {
 
 
       }
+      console.log("delete from redis", session_id);
 
       await redis_client.del(session_id)
     });
@@ -1459,6 +1468,7 @@ function startConnect() {
       Promise.resolve(m_storechat.markResolved(session_id)).then(async function (
         result
       ) {
+        console.log("delete from redis", session_id);
         await redis_client.del(session_id)
 
         log.info('In marked resolved  :: ' + 'saving the session : ' + data['session-id'] + 'as resolved : user data : ' + JSON.stringify(data))
