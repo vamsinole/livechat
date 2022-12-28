@@ -1,4 +1,4 @@
-require("dotenv").config();s
+require("dotenv").config();
 var app = require("express")();
 const fs = require("fs");
 const url = require("url");
