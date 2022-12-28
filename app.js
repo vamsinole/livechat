@@ -1680,7 +1680,7 @@ app.post("/simvolyWebhook", async (req, res) => {
 
 async function sendWhatsappNotification(number, data, bot_name) {
 
-  number = ""+number.split('-').join('').split('+').join('')
+  number = "" + number.split('-').join('').split('+').join('')
 
   let options = {
     method: "POST",
@@ -1689,13 +1689,13 @@ async function sendWhatsappNotification(number, data, bot_name) {
       message: "Testing template",
       template_name: "livechat",
       chatbot_id: "5354",
-      number:  number,
+      number: number,
       header_params: [],
       body_params: [bot_name],
       button_params: [],
       language: "en",
     },
-    json:true
+    json: true
   }
   console.log(options)
   let resp = await doRequest(options)
@@ -2044,6 +2044,6 @@ io.on("close", function (socket) {
 
 startConnect();
 
-http.listen(8000, function () {
-  console.log("listening on *:8007");
+http.listen(3400, function () {
+  console.log("listening on *:3400");
 });
