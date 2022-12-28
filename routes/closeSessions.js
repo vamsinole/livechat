@@ -6,8 +6,8 @@ const redis_client = require('../../cinepolis/redis');
 
 
 const m_storechat = require("../models/m_store_chat");
-
-const IO = SocketIO.connect("https://www.smatbot.com:8000", {
+const PORT = process.env.PORT;
+const IO = SocketIO.connect(`https://www.smatbot.com:${PORT}`, {
     transports: ["websocket"], reconnect: true
 });
 
@@ -51,7 +51,7 @@ router.get('/closeSessions', async (req, res) => {
 
 
                             data['session_id'] = openSession.session_id
-        
+
                         }
 
                         // data['session_id'] = await redis_client.readCache("" + openSession.session_id, "session_id") || openSession.session_id

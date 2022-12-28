@@ -1,3 +1,4 @@
+require("dotenv").config();s
 var app = require("express")();
 const fs = require("fs");
 const url = require("url");
@@ -1626,25 +1627,6 @@ function startConnect() {
 
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 app.get("/", function (req, res) {
   res.sendFile(__dirname + "/index.html");
 });
@@ -2044,6 +2026,6 @@ io.on("close", function (socket) {
 
 startConnect();
 
-http.listen(3400, function () {
-  console.log("listening on *:3400");
+http.listen(process.env.PORT, function () {
+  console.log(`listening on *:${process.env.PORT}`);
 });

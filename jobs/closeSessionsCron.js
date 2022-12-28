@@ -2,7 +2,7 @@
 const cron = require('node-cron');
 const { doRequest } = require('../utils/doRequest.js')
 const timeStamp = require('../utils/timeStamp.js')
-
+const PORT = process.env.PORT;
 
 const closeSessionCron = cron.schedule("*/1 * * * *", async function () {
 
